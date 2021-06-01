@@ -144,7 +144,7 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
             }
         }
 
-        for (accessor, accessees) in forward {
+        for (accessor, accessees) in forward.iter() {
             // Don't report on non-local items
             if !accessor.def_id().is_local() {
                 continue;
@@ -160,8 +160,6 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
 
                 if !accessee.def_id().is_local() && infallible.contains(&accessee) {
                     cx.struct_span_lint(&INFALLIBLE_ALLOCATION, item.span, |diag| {
-                        let generics = cx.tcx.generics_of(accessor.def_id());
-                        eprintln!("{:?}", generics);
                         let is_generic = accessor.substs.non_erasable_generics().next().is_some();
                         let generic_note = if is_generic {
                             format!(
@@ -173,15 +171,17 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
                             String::new()
                         };
 
+                        let accessee_path = cx
+                            .tcx
+                            .def_path_str_with_substs(accessee.def_id(), accessee.substs);
+
                         let mut diag = diag.build(&format!(
                             "`{}` can perform infallible allocation{}",
-                            cx.tcx
-                                .def_path_str_with_substs(accessee.def_id(), accessee.substs),
-                            generic_note
+                            accessee_path, generic_note
                         ));
 
                         // For generic functions try to display a stacktrace until a non-generic one.
-                        let mut caller = accessor;
+                        let mut caller = *accessor;
                         while caller.substs.non_erasable_generics().next().is_some() {
                             let spanned_caller = match backward.get(&caller).and_then(|x| x.first())
                             {
@@ -200,6 +200,38 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
                             );
                         }
 
+                        // Generate some help messages for why the function is determined to be generic.
+                        let mut msg: &str = &format!(
+                            "`{}` is determined to be infallible because it",
+                            accessee_path
+                        );
+                        let mut callee = accessee;
+                        loop {
+                            let callee_callee = match forward
+                                .get(&callee)
+                                .map(|x| &**x)
+                                .unwrap_or(&[])
+                                .iter()
+                                .find(|x| infallible.contains(&x.node))
+                            {
+                                Some(v) => v,
+                                None => break,
+                            };
+                            callee = callee_callee.node;
+
+                            diag.span_note(
+                                callee_callee.span,
+                                &format!(
+                                    "{} calls into `{}`",
+                                    msg,
+                                    cx.tcx
+                                        .def_path_str_with_substs(callee.def_id(), callee.substs)
+                                ),
+                            );
+                            msg = "which";
+                        }
+
+                        diag.note(&format!("{} may call alloc_error_handler", msg));
                         diag.emit();
                     });
                 }
