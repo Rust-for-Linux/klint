@@ -3,7 +3,28 @@ klint
 
 Lints for kernel or embedded system development.
 
-## Infallible allocation lint
+## Installation and Usage
+
+You'll first need to install `rustc-dev` and `llvm-tools-preview` through rustup:
+```console
+$ rustup component add rustc-dev llvm-tools-preview
+```
+
+Then install via Cargo:
+```console
+$ cargo install --git https://github.com/nbdd0121/klint.git
+```
+
+To run this tool, use rustup which will prepare the necessary environment variables:
+```
+rustup run nightly klint
+```
+
+`klint` will behave like rustc, just with additional lints.
+
+## Implemented Lints
+
+### Infallible allocation
 
 This lint will warn on any call that could potentially lead to invocation of the OOM handler.
 
@@ -27,7 +48,7 @@ let mut s: String = "str".into();
 // Warning
 s += "A";
 
-// Warning. Going-through generics wouldn't trick the tool.
+// Warning. Going through generics wouldn't trick the tool.
 let _: String = test("str");
 
 // Warning. Using dynamic dispatch wouldn't trick the tool.
