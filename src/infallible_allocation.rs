@@ -96,12 +96,15 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
                 continue;
             }
 
-            // These are fallible allocation functions that return null ptr on failure.
             match name.as_str() {
+                // These are fallible allocation functions that return null ptr on failure.
                 "alloc::alloc::__rust_alloc"
                 | "alloc::alloc::__rust_alloc_zeroed"
                 | "alloc::alloc::__rust_realloc"
-                | "alloc::alloc::__rust_dealloc" => {
+                | "alloc::alloc::__rust_dealloc"
+                // Fallible allocation function
+                | "alloc::string::String::try_reserve"
+                | "alloc::string::String::try_reserve_exact" => {
                     visited.insert(*accessee);
                 }
                 _ => (),
