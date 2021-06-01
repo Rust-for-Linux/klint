@@ -185,13 +185,22 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
 
                         // For generic functions try to display a stacktrace until a non-generic one.
                         let mut caller = *accessor;
+                        let mut visited = FxHashSet::default();
+                        visited.insert(*accessor);
+                        visited.insert(accessee);
                         while caller.substs.non_erasable_generics().next().is_some() {
-                            let spanned_caller = match backward.get(&caller).and_then(|x| x.first())
+                            let spanned_caller = match backward
+                                .get(&caller)
+                                .map(|x| &**x)
+                                .unwrap_or(&[])
+                                .iter()
+                                .find(|x| !visited.contains(&x.node))
                             {
                                 Some(v) => *v,
                                 None => break,
                             };
                             caller = spanned_caller.node;
+                            visited.insert(caller);
 
                             diag.span_note(
                                 spanned_caller.span,
@@ -203,7 +212,7 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
                             );
                         }
 
-                        // Generate some help messages for why the function is determined to be generic.
+                        // Generate some help messages for why the function is determined to be infallible.
                         let mut msg: &str = &format!(
                             "`{}` is determined to be infallible because it",
                             accessee_path
@@ -215,12 +224,14 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
                                 .map(|x| &**x)
                                 .unwrap_or(&[])
                                 .iter()
-                                .find(|x| infallible.contains(&x.node))
-                            {
+                                .find(|x| {
+                                    infallible.contains(&x.node) && !visited.contains(&x.node)
+                                }) {
                                 Some(v) => v,
                                 None => break,
                             };
                             callee = callee_callee.node;
+                            visited.insert(callee);
 
                             diag.span_note(
                                 callee_callee.span,
