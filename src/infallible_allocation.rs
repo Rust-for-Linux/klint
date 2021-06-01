@@ -160,18 +160,44 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
 
                 if !accessee.def_id().is_local() && infallible.contains(&accessee) {
                     cx.struct_span_lint(&INFALLIBLE_ALLOCATION, item.span, |diag| {
-                        let mut diag = diag.build(&format!(
-                            "`{}` can perform infallible allocation",
-                            cx.tcx
-                                .def_path_str_with_substs(accessee.def_id(), accessee.substs),
-                        ));
-
-                        if accessor.substs.non_erasable_generics().next().is_some() {
-                            diag.note(&format!(
-                                "when the caller is monomorphized as `{}`",
+                        let generics = cx.tcx.generics_of(accessor.def_id());
+                        eprintln!("{:?}", generics);
+                        let is_generic = accessor.substs.non_erasable_generics().next().is_some();
+                        let generic_note = if is_generic {
+                            format!(
+                                " when the caller is monomorphized as `{}`",
                                 cx.tcx
                                     .def_path_str_with_substs(accessor.def_id(), accessor.substs)
-                            ));
+                            )
+                        } else {
+                            String::new()
+                        };
+
+                        let mut diag = diag.build(&format!(
+                            "`{}` can perform infallible allocation{}",
+                            cx.tcx
+                                .def_path_str_with_substs(accessee.def_id(), accessee.substs),
+                            generic_note
+                        ));
+
+                        // For generic functions try to display a stacktrace until a non-generic one.
+                        let mut caller = accessor;
+                        while caller.substs.non_erasable_generics().next().is_some() {
+                            let spanned_caller = match backward.get(&caller).and_then(|x| x.first())
+                            {
+                                Some(v) => *v,
+                                None => break,
+                            };
+                            caller = spanned_caller.node;
+
+                            diag.span_note(
+                                spanned_caller.span,
+                                &format!(
+                                    "which is called from `{}`",
+                                    cx.tcx
+                                        .def_path_str_with_substs(caller.def_id(), caller.substs)
+                                ),
+                            );
                         }
 
                         diag.emit();
