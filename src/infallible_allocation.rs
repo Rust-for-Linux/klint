@@ -4,6 +4,7 @@ use rustc_lint::{LateContext, LateLintPass, Level, Lint, LintContext, LintPass};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::ty::Instance;
 use rustc_mir::monomorphize::collector::MonoItemCollectionMode;
+use rustc_session::declare_lint_pass;
 use rustc_span::source_map::Spanned;
 use rustc_span::symbol::sym;
 
@@ -19,13 +20,8 @@ pub static INFALLIBLE_ALLOCATION: Lint = Lint {
     crate_level_only: false,
 };
 
-pub struct InfallibleAllocation;
 
-impl LintPass for InfallibleAllocation {
-    fn name(&self) -> &'static str {
-        INFALLIBLE_ALLOCATION.name
-    }
-}
+declare_lint_pass!(InfallibleAllocation => [INFALLIBLE_ALLOCATION]);
 
 impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
     fn check_crate(&mut self, cx: &LateContext<'tcx>, _: &'tcx hir::Crate<'tcx>) {
