@@ -1,4 +1,5 @@
 #![feature(rustc_private)]
+#![warn(rustc::internal)]
 
 extern crate rustc_data_structures;
 extern crate rustc_driver;

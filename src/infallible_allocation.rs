@@ -1,31 +1,20 @@
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir as hir;
-use rustc_lint::{LateContext, LateLintPass, Level, Lint, LintContext, LintPass};
+use rustc_lint::{LateContext, LateLintPass, LintContext};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::ty::Instance;
 use rustc_mir::monomorphize::collector::MonoItemCollectionMode;
+use rustc_session::{declare_lint_pass, declare_tool_lint};
 use rustc_span::source_map::Spanned;
 use rustc_span::symbol::sym;
 
-pub static INFALLIBLE_ALLOCATION: Lint = Lint {
-    name: "klint::infallible_allocation",
-    default_level: Level::Warn,
-    desc: "",
-    edition_lint_opts: None,
-    report_in_external_macro: true,
-    future_incompatible: None,
-    is_plugin: true,
-    feature_gate: None,
-    crate_level_only: false,
-};
-
-pub struct InfallibleAllocation;
-
-impl LintPass for InfallibleAllocation {
-    fn name(&self) -> &'static str {
-        INFALLIBLE_ALLOCATION.name
-    }
+declare_tool_lint! {
+    pub klint::INFALLIBLE_ALLOCATION,
+    Warn,
+    ""
 }
+
+declare_lint_pass!(InfallibleAllocation => [INFALLIBLE_ALLOCATION]);
 
 impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
     fn check_crate(&mut self, cx: &LateContext<'tcx>, _: &'tcx hir::Crate<'tcx>) {
