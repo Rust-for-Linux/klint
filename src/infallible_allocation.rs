@@ -110,7 +110,7 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
                 continue;
             }
 
-            if cx.tcx.original_crate_name(accessee.def_id().krate) == sym::alloc {
+            if cx.tcx.crate_name(accessee.def_id().krate) == sym::alloc {
                 // If this item originates from alloc crate, mark it as infallible.
                 // Add item to the allowlist above if there are false positives.
                 work_queue.push(*accessee);
