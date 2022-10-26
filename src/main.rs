@@ -1,5 +1,6 @@
 #![feature(rustc_private)]
 #![warn(rustc::internal)]
+#![allow(rustc::potential_query_instability)]
 
 extern crate rustc_data_structures;
 extern crate rustc_driver;
@@ -8,15 +9,16 @@ extern crate rustc_hir;
 extern crate rustc_index;
 extern crate rustc_interface;
 extern crate rustc_lint;
+#[macro_use]
 extern crate rustc_middle;
-extern crate rustc_mir;
+extern crate rustc_monomorphize;
 extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_target;
 extern crate rustc_trait_selection;
 
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
 use rustc_driver::Callbacks;
 use rustc_interface::interface::Config;
@@ -30,7 +32,8 @@ impl Callbacks for MyCallbacks {
     fn config(&mut self, config: &mut Config) {
         config.register_lints = Some(Box::new(move |_, lint_store| {
             lint_store.register_lints(&[&infallible_allocation::INFALLIBLE_ALLOCATION]);
-            lint_store.register_late_pass(|| Box::new(infallible_allocation::InfallibleAllocation));
+            lint_store
+                .register_late_pass(|_| Box::new(infallible_allocation::InfallibleAllocation));
         }));
     }
 }
