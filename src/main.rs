@@ -11,6 +11,7 @@ extern crate rustc_interface;
 extern crate rustc_lint;
 #[macro_use]
 extern crate rustc_middle;
+extern crate rustc_mir_dataflow;
 extern crate rustc_monomorphize;
 extern crate rustc_session;
 extern crate rustc_span;
@@ -23,8 +24,10 @@ extern crate tracing;
 use rustc_driver::Callbacks;
 use rustc_interface::interface::Config;
 
+mod atomic_context;
 mod infallible_allocation;
 mod monomorphize_collector;
+mod util;
 
 struct MyCallbacks;
 
@@ -32,8 +35,10 @@ impl Callbacks for MyCallbacks {
     fn config(&mut self, config: &mut Config) {
         config.register_lints = Some(Box::new(move |_, lint_store| {
             lint_store.register_lints(&[&infallible_allocation::INFALLIBLE_ALLOCATION]);
+            lint_store.register_lints(&[&atomic_context::ATOMIC_CONTEXT]);
             lint_store
                 .register_late_pass(|_| Box::new(infallible_allocation::InfallibleAllocation));
+            lint_store.register_late_pass(|tcx| Box::new(atomic_context::AtomicContext::new(tcx)));
         }));
     }
 }
