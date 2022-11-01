@@ -11,9 +11,7 @@ use rustc_session::{declare_tool_lint, impl_lint_pass};
 
 use rustc_middle::mir::{BasicBlock, Body, Terminator, TerminatorKind};
 use rustc_middle::ty::{self, Instance, InternalSubsts, SubstsRef, TyCtxt};
-use rustc_mir_dataflow::{
-    fmt::DebugWithContext, lattice::FlatSet, Analysis, AnalysisDomain, Engine,
-};
+use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
 use rustc_span::DUMMY_SP;
 
 // A description of how atomic context analysis works.
@@ -79,6 +77,127 @@ impl std::fmt::Display for PreemptionCountRange {
     }
 }
 
+/// Bounds of adjustments.
+///
+/// Conceptually this only needs a lower bound and an upper bound, but if we encounter code like this
+/// ```ignore
+/// while foo() {
+///    enter_atomic();
+/// }
+/// ```
+/// then the bounds will be `0..inf`, and the dataflow analysis will essentially never converge.
+///
+/// To avoid this we would only allow each bound to be changed once, and upon multiple change we would
+/// instantly relax the bound to unbounded, which is not precise but will help the analysis converge.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct AdjustmentBounds {
+    /// Lower bound of the adjustment, inclusive.
+    lo: Option<i32>,
+    /// Upper bound of the adjustment, exclusive.
+    hi: Option<i32>,
+}
+
+impl AdjustmentBounds {
+    fn is_empty(&self) -> bool {
+        self.lo == Some(0) && self.hi == Some(0)
+    }
+
+    fn unbounded() -> Self {
+        AdjustmentBounds { lo: None, hi: None }
+    }
+
+    fn offset(&self, offset: i32) -> Self {
+        AdjustmentBounds {
+            lo: self.lo.map(|x| x + offset),
+            hi: self.hi.map(|x| x + offset),
+        }
+    }
+
+    fn single_value(&self) -> Option<i32> {
+        match *self {
+            AdjustmentBounds {
+                lo: Some(x),
+                hi: Some(y),
+            } if x + 1 == y => Some(x),
+            _ => None,
+        }
+    }
+}
+
+impl Default for AdjustmentBounds {
+    fn default() -> Self {
+        Self {
+            lo: Some(0),
+            hi: Some(0),
+        }
+    }
+}
+
+impl std::fmt::Debug for AdjustmentBounds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.lo, self.hi) {
+            (Some(x), Some(y)) if x + 1 == y => write!(f, "{}", x),
+            (Some(x), Some(y)) => write!(f, "{}..{}", x, y),
+            (Some(x), None) => write!(f, "{}..", x),
+            (None, Some(y)) => write!(f, "..{}", y),
+            (None, None) => write!(f, ".."),
+        }
+    }
+}
+
+impl JoinSemiLattice for AdjustmentBounds {
+    fn join(&mut self, other: &Self) -> bool {
+        if other.is_empty() {
+            return false;
+        }
+
+        if self.is_empty() {
+            *self = *other;
+            return true;
+        }
+
+        let mut changed = false;
+        match (self.lo, other.lo) {
+            // Already unbounded, no change needed
+            (None, _) => (),
+            // Same bound, no change needed
+            (Some(a), Some(b)) if a == b => (),
+            // Both bounded, but with different bounds (and both negative). To ensure convergence, relax to unbounded.
+            (Some(a), Some(b)) if a < 0 && b < 0 => {
+                self.lo = None;
+                changed = true;
+            }
+            // Already have lower bound
+            (Some(a), Some(b)) if a < b => (),
+            // Adjust bound
+            _ => {
+                self.lo = other.lo;
+                changed = true;
+            }
+        }
+
+        match (self.hi, other.hi) {
+            // Already unbounded, no change needed
+            (None, _) => (),
+            // Same bound, no change needed
+            (Some(a), Some(b)) if a == b => (),
+            // Both bounded, but with different bounds (and both positive). To ensure convergence, relax to unbounded.
+            (Some(a), Some(b)) if a > 0 && b > 0 => {
+                self.hi = None;
+                changed = true;
+            }
+            // Already have upper bound
+            (Some(a), Some(b)) if a > b => (),
+            // Adjust bound
+            _ => {
+                self.hi = other.hi;
+                changed = true;
+            }
+        }
+        changed
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct FunctionContextProperty {
     /// Range of preemption count that the function expects.
@@ -110,20 +229,23 @@ struct AdjustmentComputation<'tcx, 'checker> {
     max_entry_state: Cell<Option<u32>>,
 }
 
-impl DebugWithContext<AdjustmentComputation<'_, '_>> for FlatSet<i32> {}
+impl DebugWithContext<AdjustmentComputation<'_, '_>> for AdjustmentBounds {}
 
 impl<'tcx> AnalysisDomain<'tcx> for AdjustmentComputation<'tcx, '_> {
     // The number here indicates the offset in relation to the function's entry point.
-    type Domain = FlatSet<i32>;
+    type Domain = AdjustmentBounds;
 
     const NAME: &'static str = "atomic context";
 
     fn bottom_value(&self, _body: &Body<'tcx>) -> Self::Domain {
-        FlatSet::Bottom
+        Default::default()
     }
 
     fn initialize_start_block(&self, _body: &Body<'tcx>, state: &mut Self::Domain) {
-        *state = FlatSet::Elem(0);
+        *state = AdjustmentBounds {
+            lo: Some(0),
+            hi: Some(1),
+        };
     }
 }
 
@@ -157,15 +279,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
         terminator: &rustc_middle::mir::Terminator<'tcx>,
         _location: rustc_middle::mir::Location,
     ) {
-        let cur_state = match *state {
-            FlatSet::Elem(x) => x,
-            // If we are already in top state then no matter what action we perform here, it'll still be top
-            // state.
-            FlatSet::Top => return,
-            // This is a forward direction analysis and we begin with `FlatSet::Elem(0)`, so we should never
-            // see `FlatSet::Bottom` here.
-            FlatSet::Bottom => unreachable!(),
-        };
+        let Some(cur_state) = state.lo else { return };
 
         let prop =
             match self
@@ -175,7 +289,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
                 Some(Some(v)) => v,
                 Some(None) => {
                     // Too generic, need to bail out and retry after monomorphization.
-                    *state = FlatSet::Top;
+                    *state = AdjustmentBounds::unbounded();
                     // Set flag to indicate that the analysis result is not reliable and don't generate errors.
                     self.too_generic.set(true);
                     return;
@@ -233,7 +347,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
                 None => Some(saturating_sub(v, cur_state)),
             });
         }
-        *state = FlatSet::Elem(cur_state + prop.adjustment);
+        *state = state.offset(prop.adjustment);
     }
 
     fn apply_call_return_effect(
@@ -437,7 +551,9 @@ impl<'tcx> AtomicContext<'tcx> {
             }
 
             let result = analysis_result.results().entry_set_for_block(b);
-            let FlatSet::Top = result else { continue };
+            if result.single_value().is_some() {
+                continue;
+            }
 
             let mut first_problematic_block = b;
 
@@ -452,12 +568,9 @@ impl<'tcx> AtomicContext<'tcx> {
                 }
 
                 let result = analysis_result.results().entry_set_for_block(b);
-                match result {
-                    FlatSet::Top => {
-                        first_problematic_block = b;
-                        stack.extend(body.basic_blocks.predecessors()[b].iter().copied());
-                    }
-                    _ => (),
+                if result.single_value().is_none() {
+                    first_problematic_block = b;
+                    stack.extend(body.basic_blocks.predecessors()[b].iter().copied());
                 }
             }
 
@@ -485,17 +598,17 @@ impl<'tcx> AtomicContext<'tcx> {
 
                 // Compute the preemption count from this predecessor block.
                 // This value is the entry state, so we need to re-apply the adjustment.
-                let adjustment = match *analysis_result.results().entry_set_for_block(prev_block) {
-                    FlatSet::Top => None,
-                    FlatSet::Bottom => unreachable!(),
-                    FlatSet::Elem(v) => Some(
-                        match self.resolve_function_property(instance, body, terminator) {
+                let adjustment = analysis_result
+                    .results()
+                    .entry_set_for_block(prev_block)
+                    .single_value()
+                    .map(
+                        |v| match self.resolve_function_property(instance, body, terminator) {
                             Some(Some(prop)) => v + prop.adjustment,
                             Some(None) => unreachable!(),
                             None => v,
                         },
-                    ),
-                };
+                    );
 
                 let mut msg = match adjustment {
                     None => {
@@ -523,10 +636,13 @@ impl<'tcx> AtomicContext<'tcx> {
 
         // A catch-all error. MIR building usually should just have one `Return` terminator
         // so this usually shouldn't be reached.
-        self.tcx.sess.struct_span_err(
-            self.tcx.def_span(instance.def_id()),
-            "cannot infer preemption count adjustment of this function",
-        ).emit();
+        self.tcx
+            .sess
+            .struct_span_err(
+                self.tcx.def_span(instance.def_id()),
+                "cannot infer preemption count adjustment of this function",
+            )
+            .emit();
     }
 
     pub fn compute_property(&self, instance: Instance<'tcx>) -> Option<FunctionContextProperty> {
@@ -534,6 +650,11 @@ impl<'tcx> AtomicContext<'tcx> {
             let name = self.tcx.def_path_str(instance.def_id());
             return Some(self.ffi_property(&name));
         }
+
+        if !crate::monomorphize_collector::should_codegen_locally(self.tcx, &instance) {
+            return Some(Default::default());
+        }
+
         // dbg!(instance);
         let mir = self.tcx.instance_mir(instance.def);
         // dbg!(mir);
@@ -581,7 +702,7 @@ impl<'tcx> AtomicContext<'tcx> {
         }
 
         // Gather adjustments.
-        let mut adjustment = FlatSet::Bottom;
+        let mut adjustment = AdjustmentBounds::default();
         for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
             match data.terminator().kind {
                 TerminatorKind::Return => {
@@ -591,15 +712,14 @@ impl<'tcx> AtomicContext<'tcx> {
             }
         }
 
-        let adjustment = match adjustment {
+        let adjustment = if adjustment.is_empty() {
             // Diverging function, any value is fine, use the default 0.
-            FlatSet::Bottom => 0,
-            FlatSet::Elem(v) => v,
-            FlatSet::Top => {
-                // Inconsistency discovered, report an error and use the default 0.
-                self.report_adjustment_infer_error(instance, mir, &analysis_result);
-                0
-            }
+            0
+        } else if let Some(v) = adjustment.single_value() {
+            v
+        } else {
+            self.report_adjustment_infer_error(instance, mir, &analysis_result);
+            0
         };
 
         // self.tcx
