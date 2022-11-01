@@ -3,6 +3,7 @@ use std::cell::{Cell, RefCell};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir::def_id::DefId;
 use rustc_hir::LangItem;
+use rustc_index::bit_set::BitSet;
 use rustc_lint::{LateContext, LateLintPass, LintContext};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_mir_dataflow::JoinSemiLattice;
@@ -417,6 +418,117 @@ impl<'tcx> AtomicContext<'tcx> {
         result
     }
 
+    fn report_adjustment_infer_error(
+        &self,
+        instance: Instance<'tcx>,
+        body: &Body<'tcx>,
+        analysis_result: &rustc_mir_dataflow::ResultsCursor<
+            'tcx,
+            'tcx,
+            AdjustmentComputation<'tcx, '_>,
+        >,
+    ) {
+        // First step, see if there are any path that leads to a `return` statement have `Top` directly.
+        // If so, just report this.
+        for (b, data) in rustc_middle::mir::traversal::reachable(body) {
+            match data.terminator().kind {
+                TerminatorKind::Return => (),
+                _ => continue,
+            }
+
+            let result = analysis_result.results().entry_set_for_block(b);
+            let FlatSet::Top = result else { continue };
+
+            let mut first_problematic_block = b;
+
+            // Find out the first problematic block that causes `FlatSet::Top`.
+            // Not using MIR basic block traversal here because we only want to traverse basic blocks that could reach this
+            // return statement (we don't care about diverging control flow).
+            let mut visited = BitSet::new_empty(body.basic_blocks.len());
+            let mut stack = vec![b];
+            while let Some(b) = stack.pop() {
+                if !visited.insert(b) {
+                    continue;
+                }
+
+                let result = analysis_result.results().entry_set_for_block(b);
+                match result {
+                    FlatSet::Top => {
+                        first_problematic_block = b;
+                        stack.extend(body.basic_blocks.predecessors()[b].iter().copied());
+                    }
+                    _ => (),
+                }
+            }
+
+            let span = body.basic_blocks[first_problematic_block]
+                .statements
+                .first()
+                .map(|x| x.source_info.span)
+                .unwrap_or_else(|| {
+                    body.basic_blocks[first_problematic_block]
+                        .terminator()
+                        .source_info
+                        .span
+                });
+
+            let mut diag = self.tcx.sess.struct_span_err(
+                span,
+                "cannot infer preemption count adjustment at this point in function",
+            );
+            let mut count = 0;
+            for prev_block in body.basic_blocks.predecessors()[first_problematic_block]
+                .iter()
+                .copied()
+            {
+                let terminator = body.basic_blocks[prev_block].terminator();
+
+                // Compute the preemption count from this predecessor block.
+                // This value is the entry state, so we need to re-apply the adjustment.
+                let adjustment = match *analysis_result.results().entry_set_for_block(prev_block) {
+                    FlatSet::Top => None,
+                    FlatSet::Bottom => unreachable!(),
+                    FlatSet::Elem(v) => Some(
+                        match self.resolve_function_property(instance, body, terminator) {
+                            Some(Some(prop)) => v + prop.adjustment,
+                            Some(None) => unreachable!(),
+                            None => v,
+                        },
+                    ),
+                };
+
+                let mut msg = match adjustment {
+                    None => {
+                        format!("preemption count adjustment is changed in the previous iteration of the loop")
+                    }
+                    Some(v) => {
+                        format!("preemption count adjustment is {v} after this")
+                    }
+                };
+
+                match count {
+                    0 => (),
+                    1 => msg = format!("while {}", msg),
+                    _ => msg = format!("and {}", msg),
+                }
+                count += 1;
+                diag.span_note(
+                    body.basic_blocks[prev_block].terminator().source_info.span,
+                    msg,
+                );
+            }
+            diag.emit();
+            return;
+        }
+
+        // A catch-all error. MIR building usually should just have one `Return` terminator
+        // so this usually shouldn't be reached.
+        self.tcx.sess.struct_span_err(
+            self.tcx.def_span(instance.def_id()),
+            "cannot infer preemption count adjustment of this function",
+        ).emit();
+    }
+
     pub fn compute_property(&self, instance: Instance<'tcx>) -> Option<FunctionContextProperty> {
         if self.tcx.is_foreign_item(instance.def_id()) {
             let name = self.tcx.def_path_str(instance.def_id());
@@ -473,81 +585,6 @@ impl<'tcx> AtomicContext<'tcx> {
         for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
             match data.terminator().kind {
                 TerminatorKind::Return => {
-                    let result = analysis_result.results().entry_set_for_block(b);
-                    if let FlatSet::Top = result {
-                        let mut first_problematic_block = b;
-
-                        // Find out the first problematic block that causes `FlatSet::Top`.
-                        for (b, data) in rustc_middle::mir::traversal::ReversePostorder::new(mir, b)
-                        {
-                            if let FlatSet::Top = analysis_result.results().entry_set_for_block(b) {
-                                first_problematic_block = b;
-                                break;
-                            }
-                        }
-
-                        let span = mir.basic_blocks[first_problematic_block]
-                            .statements
-                            .first()
-                            .map(|x| x.source_info.span)
-                            .unwrap_or_else(|| {
-                                mir.basic_blocks[first_problematic_block]
-                                    .terminator()
-                                    .source_info
-                                    .span
-                            });
-
-                        let mut diag = self.tcx.sess.struct_span_err(
-                            span,
-                            "cannot infer preemption count adjustment at this point in function",
-                        );
-                        let mut count = 0;
-                        for prev_block in mir.basic_blocks.predecessors()[first_problematic_block]
-                            .iter()
-                            .copied()
-                        {
-                            let terminator = mir.basic_blocks[prev_block].terminator();
-
-                            // Compute the preemption count from this predecessor block.
-                            // This value is the entry state, so we need to re-apply the adjustment.
-                            let adjustment =
-                                match *analysis_result.results().entry_set_for_block(prev_block) {
-                                    FlatSet::Top => None,
-                                    FlatSet::Bottom => unreachable!(),
-                                    FlatSet::Elem(v) => Some(
-                                        match self
-                                            .resolve_function_property(instance, mir, terminator)
-                                        {
-                                            Some(Some(prop)) => v + prop.adjustment,
-                                            Some(None) => unreachable!(),
-                                            None => v,
-                                        },
-                                    ),
-                                };
-
-                            let mut msg = match adjustment {
-                                None => {
-                                    format!("preemption count adjustment is changed in the previous iteration of the loop")
-                                }
-                                Some(v) => {
-                                    format!("preemption count adjustment is {v} after this")
-                                }
-                            };
-
-                            match count {
-                                0 => (),
-                                1 => msg = format!("while {}", msg),
-                                _ => msg = format!("and {}", msg),
-                            }
-                            count += 1;
-                            diag.span_note(
-                                mir.basic_blocks[prev_block].terminator().source_info.span,
-                                msg,
-                            );
-                        }
-                        diag.emit();
-                    }
-
                     adjustment.join(analysis_result.results().entry_set_for_block(b));
                 }
                 _ => (),
@@ -559,13 +596,8 @@ impl<'tcx> AtomicContext<'tcx> {
             FlatSet::Bottom => 0,
             FlatSet::Elem(v) => v,
             FlatSet::Top => {
-                self.tcx
-                    .sess
-                    .struct_span_err(
-                        self.tcx.def_span(instance.def_id()),
-                        "cannot infer context adjustment for function",
-                    )
-                    .emit();
+                // Inconsistency discovered, report an error and use the default 0.
+                self.report_adjustment_infer_error(instance, mir, &analysis_result);
                 0
             }
         };
