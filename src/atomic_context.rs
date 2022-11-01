@@ -1,18 +1,16 @@
 use std::cell::{Cell, RefCell};
 
-use rustc_data_structures::fx::{FxHashMap, FxHashSet};
-use rustc_hir::def_id::DefId;
+use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::LangItem;
 use rustc_index::bit_set::BitSet;
-use rustc_lint::{LateContext, LateLintPass, LintContext};
-use rustc_middle::mir::mono::MonoItem;
+use rustc_lint::{LateContext, LateLintPass};
+use rustc_mir_dataflow::lattice::MeetSemiLattice;
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_session::{declare_tool_lint, impl_lint_pass};
 
 use rustc_middle::mir::{BasicBlock, Body, Terminator, TerminatorKind};
-use rustc_middle::ty::{self, Instance, InternalSubsts, SubstsRef, TyCtxt};
+use rustc_middle::ty::{self, Instance, InternalSubsts, TyCtxt};
 use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
-use rustc_span::DUMMY_SP;
 
 // A description of how atomic context analysis works.
 //
@@ -61,18 +59,76 @@ use rustc_span::DUMMY_SP;
 // point globally in a call graph. This is not very practical, so we would instead require explicit markings on
 // these recursive functions, and if unmarked, assume these functions to make no adjustments to the preemption
 // count and have no assumptions on the preemption count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 
 struct PreemptionCountRange {
     lo: u32,
     hi: Option<u32>,
 }
 
+impl PreemptionCountRange {
+    fn top() -> Self {
+        Self { lo: 0, hi: None }
+    }
+
+    fn is_empty(&self) -> bool {
+        if let Some(hi) = self.hi {
+            self.lo >= hi
+        } else {
+            false
+        }
+    }
+}
+
+impl MeetSemiLattice for PreemptionCountRange {
+    fn meet(&mut self, other: &Self) -> bool {
+        let mut changed = false;
+        if self.lo < other.lo {
+            self.lo = other.lo;
+            changed = true;
+        }
+
+        match (self.hi, other.hi) {
+            (_, None) => (),
+            (None, Some(_)) => {
+                self.hi = other.hi;
+                changed = true;
+            }
+            (Some(a), Some(b)) => {
+                if a > b {
+                    self.hi = Some(b);
+                    changed = true;
+                }
+            }
+        }
+
+        changed
+    }
+}
+
 impl std::fmt::Display for PreemptionCountRange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(hi) = self.hi {
-            write!(f, "{}..{}", self.lo, hi)
-        } else {
-            write!(f, "{}..", self.lo)
+        match (self.lo, self.hi) {
+            (lo, None) => write!(f, "{}..", lo),
+            // (lo, Some(hi)) if lo + 1 == hi => write!(f, "{lo}"),
+            (lo, Some(hi)) => write!(f, "{}..{}", lo, hi),
+        }
+    }
+}
+
+impl std::ops::Add<AdjustmentBounds> for PreemptionCountRange {
+    type Output = Self;
+
+    fn add(self, rhs: AdjustmentBounds) -> Self::Output {
+        Self {
+            lo: match rhs.lo {
+                None => 0,
+                Some(bound) => saturating_add(self.lo, bound),
+            },
+            hi: self
+                .hi
+                .zip(rhs.hi)
+                .map(|(hi, bound)| saturating_add(hi, bound - 1)),
         }
     }
 }
@@ -198,6 +254,17 @@ impl JoinSemiLattice for AdjustmentBounds {
     }
 }
 
+impl std::ops::Neg for AdjustmentBounds {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self {
+            lo: self.hi.map(|x| 1 - x),
+            hi: self.lo.map(|x| 1 - x),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct FunctionContextProperty {
     /// Range of preemption count that the function expects.
@@ -220,13 +287,10 @@ impl Default for FunctionContextProperty {
 }
 
 struct AdjustmentComputation<'tcx, 'checker> {
-    tcx: TyCtxt<'tcx>,
     checker: &'checker AtomicContext<'tcx>,
     body: &'tcx Body<'tcx>,
     instance: Instance<'tcx>,
     too_generic: Cell<bool>,
-    min_entry_state: Cell<u32>,
-    max_entry_state: Cell<Option<u32>>,
 }
 
 impl DebugWithContext<AdjustmentComputation<'_, '_>> for AdjustmentBounds {}
@@ -260,10 +324,6 @@ fn saturating_add(x: u32, y: i32) -> u32 {
     }
 }
 
-fn saturating_sub(x: u32, y: i32) -> u32 {
-    saturating_add(x, -y)
-}
-
 impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
     fn apply_statement_effect(
         &self,
@@ -279,8 +339,6 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
         terminator: &rustc_middle::mir::Terminator<'tcx>,
         _location: rustc_middle::mir::Location,
     ) {
-        let Some(cur_state) = state.lo else { return };
-
         let prop =
             match self
                 .checker
@@ -297,56 +355,6 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
                 None => return,
             };
 
-        let new_min_entry_state = std::cmp::max(
-            self.min_entry_state.get(),
-            saturating_sub(prop.assumptions.0, cur_state),
-        );
-        let new_max_entry_state = match (self.max_entry_state.get(), prop.assumptions.1) {
-            (Some(x), Some(v)) => Some(std::cmp::min(x, saturating_sub(v, cur_state))),
-            (Some(x), None) => Some(x),
-            (None, Some(v)) => Some(saturating_sub(v, cur_state)),
-            (None, None) => None,
-        };
-
-        if new_max_entry_state.is_some() && new_min_entry_state >= new_max_entry_state.unwrap() {
-            // This function will cause the entry state to be in an unsatisfiable condition.
-            // Generate an error.
-            let span = terminator.source_info.span;
-            let mut builder = self.tcx.sess.struct_span_err(
-                span,
-                format!(
-                    "this function expects the preemption count to be in range {}",
-                    PreemptionCountRange {
-                        lo: prop.assumptions.0,
-                        hi: prop.assumptions.1,
-                    }
-                ),
-            );
-
-            builder.note(format!(
-                "but the possible preemption count at this function call is {}",
-                PreemptionCountRange {
-                    lo: saturating_add(self.min_entry_state.get(), cur_state),
-                    hi: self
-                        .max_entry_state
-                        .get()
-                        .map(|v| saturating_add(v, cur_state)),
-                }
-            ));
-
-            builder.emit();
-        }
-
-        self.min_entry_state.set(std::cmp::max(
-            self.min_entry_state.get(),
-            saturating_sub(prop.assumptions.0, cur_state),
-        ));
-        if let Some(v) = prop.assumptions.1 {
-            self.max_entry_state.set(match self.max_entry_state.get() {
-                Some(x) => Some(std::cmp::min(x, saturating_sub(v, cur_state))),
-                None => Some(saturating_sub(v, cur_state)),
-            });
-        }
         *state = state.offset(prop.adjustment);
     }
 
@@ -659,13 +667,10 @@ impl<'tcx> AtomicContext<'tcx> {
         let mir = self.tcx.instance_mir(instance.def);
         // dbg!(mir);
         let analysis_result = AdjustmentComputation {
-            tcx: self.tcx,
             checker: self,
             body: mir,
             instance,
             too_generic: Cell::new(false),
-            min_entry_state: Cell::new(0),
-            max_entry_state: Cell::new(None),
         }
         .into_engine(self.tcx, mir)
         .iterate_to_fixpoint()
@@ -682,23 +687,6 @@ impl<'tcx> AtomicContext<'tcx> {
             //     )
             //     .emit();
             return None;
-        }
-
-        // Gather assumptions.
-        let mut min_entry_state = analysis.min_entry_state.get();
-        let mut max_entry_state = analysis.max_entry_state.get();
-        if max_entry_state.is_some() && min_entry_state >= max_entry_state.unwrap() {
-            self.tcx
-                .sess
-                .struct_span_err(
-                    self.tcx.def_span(instance.def_id()),
-                    "cannot infer context assumption for function",
-                )
-                .emit();
-
-            // For failed inference, revert to the default.
-            min_entry_state = 0;
-            max_entry_state = None;
         }
 
         // Gather adjustments.
@@ -722,20 +710,61 @@ impl<'tcx> AtomicContext<'tcx> {
             0
         };
 
+        // Gather assumptions.
+        let mut assumption = PreemptionCountRange::top();
+        for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
+            match self.resolve_function_property(instance, mir, data.terminator()) {
+                Some(Some(prop)) => {
+                    let adj = *analysis_result.results().entry_set_for_block(b);
+                    let range = PreemptionCountRange {
+                        lo: prop.assumptions.0,
+                        hi: prop.assumptions.1,
+                    };
+                    let mut expected = range + (-adj);
+                    expected.meet(&assumption);
+                    if expected.is_empty() {
+                        // This function will cause the entry state to be in an unsatisfiable condition.
+                        // Generate an error.
+                        let span = data.terminator().source_info.span;
+                        let mut diag = self.tcx.sess.struct_span_err(
+                            span,
+                            format!(
+                                "this function expects the preemption count to be in range {}",
+                                range
+                            ),
+                        );
+
+                        diag.note(format!(
+                            "but the possible preemption count at this function call is {}",
+                            assumption + adj
+                        ));
+                        diag.emit();
+                    }
+                    assumption = expected;
+                }
+                Some(None) => unreachable!(),
+                None => (),
+            }
+        }
+
+        if assumption.is_empty() {
+            // For failed inference, revert to the default.
+            assumption = PreemptionCountRange { lo: 0, hi: None };
+        }
+
         // self.tcx
         //     .sess
         //     .struct_span_warn(
         //         self.tcx.def_span(instance.def_id()),
         //         format!(
-        //             "function checked with {:?}, {}, {instance:?}",
-        //             (min_entry_state, max_entry_state),
-        //             adjustment
+        //             "function checked with {}, {}, {instance:?}",
+        //             assumption, adjustment
         //         ),
         //     )
         //     .emit();
 
         Some(FunctionContextProperty {
-            assumptions: (min_entry_state, max_entry_state),
+            assumptions: (assumption.lo, assumption.hi),
             adjustment: adjustment,
         })
     }
