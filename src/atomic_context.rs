@@ -419,7 +419,10 @@ impl<'tcx> AtomicContext<'tcx> {
                             .unwrap();
                     match func {
                         Some(func) => Some(ResolveResult::Ok(func)),
-                        None => Some(ResolveResult::TooGeneric),
+                        None => {
+                            warn!("Resolving function {callee_ty} returns too generic");
+                            Some(ResolveResult::TooGeneric)
+                        }
                     }
                 } else {
                     Some(ResolveResult::IndirectCall)
@@ -438,7 +441,10 @@ impl<'tcx> AtomicContext<'tcx> {
 
                 match func {
                     Some(func) => Some(ResolveResult::Ok(func)),
-                    None => Some(ResolveResult::TooGeneric),
+                    None => {
+                        warn!("Resolving drop of {ty:?} returns too generic");
+                        Some(ResolveResult::TooGeneric)
+                    }
                 }
             }
             _ => None,
@@ -658,7 +664,14 @@ impl<'tcx> AtomicContext<'tcx> {
             .emit();
     }
 
+    #[instrument(skip_all, fields(instance=%instance), ret)]
     pub fn compute_property(&self, instance: Instance<'tcx>) -> Option<FunctionContextProperty> {
+        // No Rust built-in intrinsics will mess with preemption count.
+        match instance.def {
+            ty::InstanceDef::Intrinsic(_) => return Some(Default::default()),
+            _ => (),
+        }
+
         if self.tcx.is_foreign_item(instance.def_id()) {
             let name = self.tcx.def_path_str(instance.def_id());
             return Some(self.ffi_property(&name));
@@ -685,13 +698,7 @@ impl<'tcx> AtomicContext<'tcx> {
         let analysis = analysis_result.analysis();
 
         if analysis.too_generic.get() {
-            // self.tcx
-            //     .sess
-            //     .struct_span_warn(
-            //         self.tcx.def_span(instance.def_id()),
-            //         format!("function too generic ({:?})", instance),
-            //     )
-            //     .emit();
+            warn!("function too generic");
             return None;
         }
 
