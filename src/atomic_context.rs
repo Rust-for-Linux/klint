@@ -337,8 +337,13 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
         &self,
         state: &mut Self::Domain,
         terminator: &rustc_middle::mir::Terminator<'tcx>,
-        _location: rustc_middle::mir::Location,
+        location: rustc_middle::mir::Location,
     ) {
+        // Skip all unwinding paths.
+        if self.body.basic_blocks[location.block].is_cleanup {
+            return;
+        }
+
         let prop =
             match self
                 .checker
@@ -673,6 +678,7 @@ impl<'tcx> AtomicContext<'tcx> {
             too_generic: Cell::new(false),
         }
         .into_engine(self.tcx, mir)
+        .dead_unwinds(&BitSet::new_filled(mir.basic_blocks.len()))
         .iterate_to_fixpoint()
         .into_results_cursor(mir);
 
@@ -713,6 +719,10 @@ impl<'tcx> AtomicContext<'tcx> {
         // Gather assumptions.
         let mut assumption = PreemptionCountRange::top();
         for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
+            if data.is_cleanup {
+                continue;
+            }
+
             match self.resolve_function_property(instance, mir, data.terminator()) {
                 Some(Some(prop)) => {
                     let adj = *analysis_result.results().entry_set_for_block(b);
