@@ -606,7 +606,7 @@ impl<'tcx> AtomicContext<'tcx> {
 
             let mut diag = self.tcx.sess.struct_span_err(
                 span,
-                "cannot infer preemption count adjustment at this point in function",
+                "cannot infer preemption count adjustment at this point",
             );
             let mut count = 0;
             for prev_block in body.basic_blocks.predecessors()[first_problematic_block]
@@ -742,20 +742,35 @@ impl<'tcx> AtomicContext<'tcx> {
                     if expected.is_empty() {
                         // This function will cause the entry state to be in an unsatisfiable condition.
                         // Generate an error.
+                        let (kind, drop_span) = match data.terminator().kind {
+                            TerminatorKind::Drop { place, .. } => {
+                                ("drop", Some(mir.local_decls[place.local].source_info.span))
+                            }
+                            _ => {
+                                ("call", None)
+                            }
+                        };
                         let span = data.terminator().source_info.span;
                         let mut diag = self.tcx.sess.struct_span_err(
                             span,
                             format!(
-                                "this function expects the preemption count to be in range {}",
+                                "this {kind} expects the preemption count to be in range {}",
                                 range
                             ),
                         );
 
+                        if let Some(span) = drop_span {
+                            diag.span_label(span, "the value being dropped is declared here");
+                        }
+
                         diag.note(format!(
-                            "but the possible preemption count at this function call is {}",
+                            "but the possible preemption count at this point is {}",
                             assumption + adj
                         ));
                         diag.emit();
+
+                        // Stop processing other calls in this function to avoid generating too many errors.
+                        break;
                     }
                     assumption = expected;
                 }
