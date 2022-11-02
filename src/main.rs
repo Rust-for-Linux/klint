@@ -21,6 +21,8 @@ extern crate rustc_trait_selection;
 #[macro_use]
 extern crate tracing;
 
+use std::process::ExitCode;
+
 use rustc_driver::Callbacks;
 use rustc_interface::interface::Config;
 
@@ -54,7 +56,8 @@ fn probe_sysroot() -> String {
         .expect("failed to probe rust sysroot")
 }
 
-fn main() -> rustc_interface::interface::Result<()> {
+fn main() -> ExitCode {
+    rustc_driver::init_env_logger("KLINT_LOG");
     let mut args: Vec<_> = std::env::args().collect();
 
     if !args.iter().any(|x| x == "--sysroot") {
@@ -62,5 +65,8 @@ fn main() -> rustc_interface::interface::Result<()> {
         args.push(probe_sysroot());
     }
 
-    rustc_driver::RunCompiler::new(&args, &mut MyCallbacks).run()
+    match rustc_driver::RunCompiler::new(&args, &mut MyCallbacks).run() {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(_) => ExitCode::FAILURE,
+    }
 }
