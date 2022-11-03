@@ -71,6 +71,13 @@ impl PreemptionCountRange {
         Self { lo: 0, hi: None }
     }
 
+    fn single_value(v: u32) -> Self {
+        Self {
+            lo: v,
+            hi: Some(v + 1),
+        }
+    }
+
     fn is_empty(&self) -> bool {
         if let Some(hi) = self.hi {
             self.lo >= hi
@@ -110,7 +117,7 @@ impl std::fmt::Display for PreemptionCountRange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match (self.lo, self.hi) {
             (lo, None) => write!(f, "{}..", lo),
-            // (lo, Some(hi)) if lo + 1 == hi => write!(f, "{lo}"),
+            (lo, Some(hi)) if lo + 1 == hi => write!(f, "{lo}"),
             (lo, Some(hi)) => write!(f, "{}..{}", lo, hi),
         }
     }
@@ -129,6 +136,24 @@ impl std::ops::Add<AdjustmentBounds> for PreemptionCountRange {
                 .hi
                 .zip(rhs.hi)
                 .map(|(hi, bound)| saturating_add(hi, bound - 1)),
+        }
+    }
+}
+
+impl std::ops::Sub<AdjustmentBounds> for PreemptionCountRange {
+    type Output = Self;
+
+    fn sub(self, rhs: AdjustmentBounds) -> Self::Output {
+        Self {
+            lo: match rhs.lo {
+                None => 0,
+                Some(bound) => saturating_add(self.lo, -bound),
+            },
+            hi: match (self.hi, rhs.hi) {
+                (None, _) => None,
+                (_, None) => Some(0),
+                (Some(hi), Some(bound)) => Some(saturating_add(hi, 1 - bound)),
+            },
         }
     }
 }
@@ -169,7 +194,7 @@ impl AdjustmentBounds {
         }
     }
 
-    fn single_value(&self) -> Option<i32> {
+    fn is_single_value(&self) -> Option<i32> {
         match *self {
             AdjustmentBounds {
                 lo: Some(x),
@@ -254,17 +279,6 @@ impl JoinSemiLattice for AdjustmentBounds {
     }
 }
 
-impl std::ops::Neg for AdjustmentBounds {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Self {
-            lo: self.hi.map(|x| 1 - x),
-            hi: self.lo.map(|x| 1 - x),
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct FunctionContextProperty {
     /// Range of preemption count that the function expects.
@@ -273,14 +287,14 @@ pub struct FunctionContextProperty {
     /// and "no assumption" is represented with 0; the upper bound is represented using an `Option<u32>`, with
     /// `None` representing "no assumption". The upper bound is exclusive so `(0, Some(0))` represents an
     /// unsatisfiable condition.
-    assumptions: (u32, Option<u32>),
+    assumption: PreemptionCountRange,
     adjustment: i32,
 }
 
 impl Default for FunctionContextProperty {
     fn default() -> Self {
         FunctionContextProperty {
-            assumptions: (0, None),
+            assumption: PreemptionCountRange::top(),
             adjustment: 0,
         }
     }
@@ -464,7 +478,7 @@ impl<'tcx> AtomicContext<'tcx> {
             },
             Some(ResolveResult::TooGeneric) => Some(None),
             Some(ResolveResult::IndirectCall) => Some(Some(FunctionContextProperty {
-                assumptions: (0, None),
+                assumption: PreemptionCountRange::top(),
                 adjustment: 0,
             })),
             None => None,
@@ -474,26 +488,26 @@ impl<'tcx> AtomicContext<'tcx> {
     pub fn ffi_property(&self, symbol: &str) -> FunctionContextProperty {
         match symbol {
             "enter_atomic" => FunctionContextProperty {
-                assumptions: (0, None),
+                assumption: PreemptionCountRange::top(),
                 adjustment: 1,
             },
             "leave_atomic" => FunctionContextProperty {
-                assumptions: (1, None),
+                assumption: PreemptionCountRange { lo: 1, hi: None },
                 adjustment: -1,
             },
             "require_atomic" => FunctionContextProperty {
-                assumptions: (1, None),
+                assumption: PreemptionCountRange { lo: 1, hi: None },
                 adjustment: 0,
             },
             "require_not_atomic" => FunctionContextProperty {
-                assumptions: (0, Some(1)),
+                assumption: PreemptionCountRange::single_value(0),
                 adjustment: 0,
             },
             _ => {
                 // dbg!(symbol);
                 // Other functions, assume no context change for now.
                 FunctionContextProperty {
-                    assumptions: (0, None),
+                    assumption: PreemptionCountRange::top(),
                     adjustment: 0,
                 }
             }
@@ -570,7 +584,7 @@ impl<'tcx> AtomicContext<'tcx> {
             }
 
             let result = analysis_result.results().entry_set_for_block(b);
-            if result.single_value().is_some() {
+            if result.is_single_value().is_some() {
                 continue;
             }
 
@@ -587,7 +601,7 @@ impl<'tcx> AtomicContext<'tcx> {
                 }
 
                 let result = analysis_result.results().entry_set_for_block(b);
-                if result.single_value().is_none() {
+                if result.is_single_value().is_none() {
                     first_problematic_block = b;
                     stack.extend(body.basic_blocks.predecessors()[b].iter().copied());
                 }
@@ -620,7 +634,7 @@ impl<'tcx> AtomicContext<'tcx> {
                 let adjustment = analysis_result
                     .results()
                     .entry_set_for_block(prev_block)
-                    .single_value()
+                    .is_single_value()
                     .map(
                         |v| match self.resolve_function_property(instance, body, terminator) {
                             Some(Some(prop)) => v + prop.adjustment,
@@ -716,7 +730,7 @@ impl<'tcx> AtomicContext<'tcx> {
         let adjustment = if adjustment.is_empty() {
             // Diverging function, any value is fine, use the default 0.
             0
-        } else if let Some(v) = adjustment.single_value() {
+        } else if let Some(v) = adjustment.is_single_value() {
             v
         } else {
             self.report_adjustment_infer_error(instance, mir, &analysis_result);
@@ -733,11 +747,14 @@ impl<'tcx> AtomicContext<'tcx> {
             match self.resolve_function_property(instance, mir, data.terminator()) {
                 Some(Some(prop)) => {
                     let adj = *analysis_result.results().entry_set_for_block(b);
-                    let range = PreemptionCountRange {
-                        lo: prop.assumptions.0,
-                        hi: prop.assumptions.1,
-                    };
-                    let mut expected = range + (-adj);
+
+                    // We need to find a range that for all possible values in `adj`, it will end up in a value
+                    // that lands inside `prop.assumption`.
+                    //
+                    // For example, if adjustment is `0..`, and range is `0..1`, then the range we want is `0..0`,
+                    // i.e. an empty range, because no matter what preemption count we start with, if we apply an
+                    // adjustment >0, then it will be outside the range.
+                    let mut expected = prop.assumption - adj;
                     expected.meet(&assumption);
                     if expected.is_empty() {
                         // This function will cause the entry state to be in an unsatisfiable condition.
@@ -746,16 +763,14 @@ impl<'tcx> AtomicContext<'tcx> {
                             TerminatorKind::Drop { place, .. } => {
                                 ("drop", Some(mir.local_decls[place.local].source_info.span))
                             }
-                            _ => {
-                                ("call", None)
-                            }
+                            _ => ("call", None),
                         };
                         let span = data.terminator().source_info.span;
                         let mut diag = self.tcx.sess.struct_span_err(
                             span,
                             format!(
-                                "this {kind} expects the preemption count to be in range {}",
-                                range
+                                "this {kind} expects the preemption count to be {}",
+                                prop.assumption
                             ),
                         );
 
@@ -769,6 +784,9 @@ impl<'tcx> AtomicContext<'tcx> {
                         ));
                         diag.emit();
 
+                        // For failed inference, revert to the default.
+                        assumption = PreemptionCountRange { lo: 0, hi: None };
+
                         // Stop processing other calls in this function to avoid generating too many errors.
                         break;
                     }
@@ -779,25 +797,9 @@ impl<'tcx> AtomicContext<'tcx> {
             }
         }
 
-        if assumption.is_empty() {
-            // For failed inference, revert to the default.
-            assumption = PreemptionCountRange { lo: 0, hi: None };
-        }
-
-        // self.tcx
-        //     .sess
-        //     .struct_span_warn(
-        //         self.tcx.def_span(instance.def_id()),
-        //         format!(
-        //             "function checked with {}, {}, {instance:?}",
-        //             assumption, adjustment
-        //         ),
-        //     )
-        //     .emit();
-
         Some(FunctionContextProperty {
-            assumptions: (assumption.lo, assumption.hi),
-            adjustment: adjustment,
+            assumption,
+            adjustment,
         })
     }
 }
