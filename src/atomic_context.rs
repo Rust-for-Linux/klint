@@ -426,7 +426,11 @@ impl<'tcx> AtomicContext<'tcx> {
         match &terminator.kind {
             TerminatorKind::Call { func, .. } => {
                 let callee_ty = func.ty(body, self.tcx);
-                let callee_ty = instance.subst_mir(self.tcx, &callee_ty);
+                let callee_ty = instance.subst_mir_and_normalize_erasing_regions(
+                    self.tcx,
+                    ty::ParamEnv::reveal_all(),
+                    callee_ty,
+                );
                 if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
                     let func =
                         ty::Instance::resolve(self.tcx, ty::ParamEnv::reveal_all(), def_id, substs)
@@ -444,7 +448,11 @@ impl<'tcx> AtomicContext<'tcx> {
             }
             TerminatorKind::Drop { place, .. } => {
                 let ty = place.ty(body, self.tcx).ty;
-                let ty = instance.subst_mir(self.tcx, &ty);
+                let ty = instance.subst_mir_and_normalize_erasing_regions(
+                    self.tcx,
+                    ty::ParamEnv::reveal_all(),
+                    ty,
+                );
 
                 // Do not call `resolve_drop_in_place` directly as it does double unwrap.
                 let def_id = self.tcx.require_lang_item(LangItem::DropInPlace, None);
