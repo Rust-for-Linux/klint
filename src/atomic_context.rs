@@ -61,9 +61,9 @@ use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
 // count and have no assumptions on the preemption count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 
-struct PreemptionCountRange {
-    lo: u32,
-    hi: Option<u32>,
+pub struct PreemptionCountRange {
+    pub lo: u32,
+    pub hi: Option<u32>,
 }
 
 impl PreemptionCountRange {

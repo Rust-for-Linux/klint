@@ -1,7 +1,9 @@
 #![feature(rustc_private)]
+#![feature(once_cell)]
 #![warn(rustc::internal)]
 #![allow(rustc::potential_query_instability)]
 
+extern crate rustc_ast;
 extern crate rustc_data_structures;
 extern crate rustc_driver;
 extern crate rustc_errors;
@@ -27,15 +29,24 @@ use rustc_driver::Callbacks;
 use rustc_interface::interface::Config;
 
 mod atomic_context;
+mod attribute;
 mod infallible_allocation;
 mod monomorphize_collector;
+mod symbol;
 mod util;
+
+rustc_session::declare_tool_lint! {
+    pub klint::INCORRECT_ATTRIBUTE,
+    Forbid,
+    "Incorrect usage of klint attributes"
+}
 
 struct MyCallbacks;
 
 impl Callbacks for MyCallbacks {
     fn config(&mut self, config: &mut Config) {
         config.register_lints = Some(Box::new(move |_, lint_store| {
+            lint_store.register_lints(&[&INCORRECT_ATTRIBUTE]);
             lint_store.register_lints(&[&infallible_allocation::INFALLIBLE_ALLOCATION]);
             lint_store.register_lints(&[&atomic_context::ATOMIC_CONTEXT]);
             lint_store
