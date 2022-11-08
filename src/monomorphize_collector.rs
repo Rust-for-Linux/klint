@@ -123,14 +123,24 @@ pub fn collect_crate_mono_items(
         tcx.sess.time("monomorphization_collector_graph_walk", || {
             par_for_each_in(roots, |root| {
                 let mut recursion_depths = DefIdMap::default();
-                collect_items_rec(
-                    tcx,
-                    dummy_spanned(root),
-                    visited,
-                    &mut recursion_depths,
-                    recursion_limit,
-                    access_map,
-                );
+                let should_gen = match root {
+                    MonoItem::Static(def_id) => {
+                        let instance = Instance::mono(tcx, def_id);
+                        should_codegen_locally(tcx, &instance)
+                    }
+                    MonoItem::Fn(instance) => should_codegen_locally(tcx, &instance),
+                    MonoItem::GlobalAsm(_) => true,
+                };
+                if should_gen {
+                    collect_items_rec(
+                        tcx,
+                        dummy_spanned(root),
+                        visited,
+                        &mut recursion_depths,
+                        recursion_limit,
+                        access_map,
+                    );
+                }
             });
         });
     }
@@ -1105,6 +1115,10 @@ fn create_mono_items_for_default_impls<'tcx>(
 ) {
     match item.kind {
         hir::ItemKind::Impl(ref impl_) => {
+            if matches!(impl_.polarity, hir::ImplPolarity::Negative(_)) {
+                return;
+            }
+
             for param in impl_.generics.params {
                 match param.kind {
                     hir::GenericParamKind::Lifetime { .. } => {}
