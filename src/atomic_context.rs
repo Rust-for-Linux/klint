@@ -637,6 +637,23 @@ impl<'tcx> AtomicContext<'tcx> {
             {
                 let terminator = body.basic_blocks[prev_block].terminator();
 
+                let span = match terminator.kind {
+                    TerminatorKind::Goto { .. } => {
+                        // Goto terminator of `if .. { .. } else { .. }` has span on the entire expression,
+                        // which is not very useful.
+                        // In this case we use the last statement's span instead.
+                        body.basic_blocks[prev_block]
+                            .statements
+                            .last()
+                            .map(|x| x.source_info)
+                            .unwrap_or_else(|| {
+                                body.basic_blocks[prev_block].terminator().source_info
+                            })
+                            .span
+                    }
+                    _ => terminator.source_info.span,
+                };
+
                 // Compute the preemption count from this predecessor block.
                 // This value is the entry state, so we need to re-apply the adjustment.
                 let adjustment = analysis_result
@@ -666,10 +683,7 @@ impl<'tcx> AtomicContext<'tcx> {
                     _ => msg = format!("and {}", msg),
                 }
                 count += 1;
-                diag.span_note(
-                    body.basic_blocks[prev_block].terminator().source_info.span,
-                    msg,
-                );
+                diag.span_note(span, msg);
             }
             diag.emit();
             return;
