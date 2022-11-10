@@ -596,25 +596,24 @@ impl<'tcx> AtomicContext<'tcx> {
                 continue;
             }
 
+            // Find the deepest single-value block in the dominator tree.
             let mut first_problematic_block = b;
-
-            // Find out the first problematic block that causes `FlatSet::Top`.
-            // Not using MIR basic block traversal here because we only want to traverse basic blocks that could reach this
-            // return statement (we don't care about diverging control flow).
-            let mut visited = BitSet::new_empty(body.basic_blocks.len());
-            let mut stack = vec![b];
-            while let Some(b) = stack.pop() {
-                if !visited.insert(b) {
-                    continue;
+            let dominators = body.basic_blocks.dominators();
+            loop {
+                let b = dominators.immediate_dominator(first_problematic_block);
+                if b == first_problematic_block {
+                    // Shouldn't actually happen because the entry block should always have a single value.
+                    break;
                 }
 
                 let result = analysis_result.results().entry_set_for_block(b);
-                if result.is_single_value().is_none() {
-                    first_problematic_block = b;
-                    stack.extend(body.basic_blocks.predecessors()[b].iter().copied());
+                if result.is_single_value().is_some() {
+                    break;
                 }
+                first_problematic_block = b;
             }
 
+            // For this problematic block, try use a span that closest to the beginning of it.
             let span = body.basic_blocks[first_problematic_block]
                 .statements
                 .first()
@@ -630,13 +629,57 @@ impl<'tcx> AtomicContext<'tcx> {
                 span,
                 "cannot infer preemption count adjustment at this point",
             );
+
             let mut count = 0;
-            for prev_block in body.basic_blocks.predecessors()[first_problematic_block]
+            for mut prev_block in body.basic_blocks.predecessors()[first_problematic_block]
                 .iter()
                 .copied()
             {
-                let terminator = body.basic_blocks[prev_block].terminator();
+                let adjust_calc = |bb| {
+                    let terminator = body.basic_blocks[bb].terminator();
 
+                    // Compute the preemption count from this predecessor block.
+                    // This value is the entry state, so we need to re-apply the adjustment.
+                    (
+                        analysis_result
+                            .results()
+                            .entry_set_for_block(bb)
+                            .is_single_value(),
+                        match self.resolve_function_property(instance, body, terminator) {
+                            Some(Some(prop)) => prop.adjustment,
+                            Some(None) => unreachable!(),
+                            None => 0,
+                        },
+                    )
+                };
+
+                let mut adjustment = adjust_calc(prev_block);
+
+                // If this block has made no changes to the adjustment, backtrack to the parent block
+                // that made the change.
+                while adjustment.1 == 0 {
+                    let pred = &body.basic_blocks.predecessors()[prev_block];
+
+                    // Don't continue backtracking if there are multiple predecessors.
+                    if pred.len() != 1 {
+                        break;
+                    }
+                    let b = pred[0];
+
+                    // Don't continue backtracking if the predecessor block has multiple successors.
+                    let terminator = body.basic_blocks[b].terminator();
+                    let successor_count = terminator.successors().count();
+                    let has_unwind = terminator.unwind().map(|x| x.is_some()).unwrap_or(false);
+                    let normal_successor = successor_count - has_unwind as usize;
+                    if normal_successor != 1 {
+                        break;
+                    }
+
+                    prev_block = b;
+                    adjustment = adjust_calc(prev_block);
+                }
+
+                let terminator = body.basic_blocks[prev_block].terminator();
                 let span = match terminator.kind {
                     TerminatorKind::Goto { .. } => {
                         // Goto terminator of `if .. { .. } else { .. }` has span on the entire expression,
@@ -646,34 +689,21 @@ impl<'tcx> AtomicContext<'tcx> {
                             .statements
                             .last()
                             .map(|x| x.source_info)
-                            .unwrap_or_else(|| {
-                                body.basic_blocks[prev_block].terminator().source_info
-                            })
+                            .unwrap_or_else(|| terminator.source_info)
                             .span
                     }
                     _ => terminator.source_info.span,
                 };
 
-                // Compute the preemption count from this predecessor block.
-                // This value is the entry state, so we need to re-apply the adjustment.
-                let adjustment = analysis_result
-                    .results()
-                    .entry_set_for_block(prev_block)
-                    .is_single_value()
-                    .map(
-                        |v| match self.resolve_function_property(instance, body, terminator) {
-                            Some(Some(prop)) => v + prop.adjustment,
-                            Some(None) => unreachable!(),
-                            None => v,
-                        },
-                    );
-
-                let mut msg = match adjustment {
+                let mut msg = match adjustment.0 {
                     None => {
                         format!("preemption count adjustment is changed in the previous iteration of the loop")
                     }
                     Some(v) => {
-                        format!("preemption count adjustment is {v} after this")
+                        format!(
+                            "preemption count adjustment is {} after this",
+                            v + adjustment.1
+                        )
                     }
                 };
 
