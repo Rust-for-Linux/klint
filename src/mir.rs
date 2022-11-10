@@ -60,9 +60,11 @@ fn local_analysis_mir<'tcx>(tcx: TyCtxt<'tcx>, did: LocalDefId) -> &'tcx Body<'t
         return tcx.optimized_mir(did.to_def_id());
     }
 
-    let mut cache = MIR_CACHE.lock().unwrap();
-    if let Some(body) = cache.get(&did) {
-        return unsafe { &*body.load(Ordering::Relaxed).cast() };
+    {
+        let cache = MIR_CACHE.lock().unwrap();
+        if let Some(body) = cache.get(&did) {
+            return unsafe { &*body.load(Ordering::Relaxed).cast() };
+        }
     }
 
     let body = tcx
@@ -72,7 +74,10 @@ fn local_analysis_mir<'tcx>(tcx: TyCtxt<'tcx>, did: LocalDefId) -> &'tcx Body<'t
     let body = remap_mir_for_const_eval_select(tcx, body, hir::Constness::NotConst);
     let body = tcx.arena.alloc(body);
 
-    cache.insert(did, AtomicPtr::new(body as *const _ as *mut _));
+    {
+        let mut cache = MIR_CACHE.lock().unwrap();
+        cache.insert(did, AtomicPtr::new(body as *const _ as *mut _));
+    }
     body
 }
 
