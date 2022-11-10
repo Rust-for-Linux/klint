@@ -1,5 +1,8 @@
 #![feature(rustc_private)]
 #![feature(once_cell)]
+#![feature(box_patterns)]
+#![feature(if_let_guard)]
+#![feature(let_chains)]
 #![warn(rustc::internal)]
 #![allow(rustc::potential_query_instability)]
 
@@ -31,6 +34,7 @@ use rustc_interface::interface::Config;
 mod atomic_context;
 mod attribute;
 mod infallible_allocation;
+mod mir;
 mod monomorphize_collector;
 mod symbol;
 mod util;
