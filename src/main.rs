@@ -27,9 +27,11 @@ extern crate rustc_trait_selection;
 extern crate tracing;
 
 use std::process::ExitCode;
+use std::sync::atomic::AtomicPtr;
 
 use rustc_driver::Callbacks;
 use rustc_interface::interface::Config;
+use std::sync::atomic::Ordering;
 
 mod atomic_context;
 mod attribute;
@@ -49,6 +51,27 @@ struct MyCallbacks;
 
 impl Callbacks for MyCallbacks {
     fn config(&mut self, config: &mut Config) {
+        config.override_queries = Some(|_, provider, _| {
+            static ORIGINAL_OPTIMIZED_MIR: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+
+            ORIGINAL_OPTIMIZED_MIR.store(provider.optimized_mir as *mut (), Ordering::Relaxed);
+            provider.optimized_mir = |tcx, def_id| {
+                // Calling `optimized_mir` will steal the result of query `mir_drops_elaborated_and_const_checked`,
+                // so hijack `optimized_mir` to run `analysis_mir` first.
+
+                // Skip `analysis_mir` call if this is a constructor, since it will be delegated back to
+                // `optimized_mir` for building ADT constructor shim.
+                if !tcx.is_constructor(def_id) {
+                    crate::mir::analysis_mir(tcx, def_id);
+                }
+
+                let ptr = ORIGINAL_OPTIMIZED_MIR.load(Ordering::Relaxed);
+                assert!(!ptr.is_null());
+                let original_optimized_mir =
+                    unsafe { std::mem::transmute::<*mut (), fn(_, _) -> _>(ptr) };
+                original_optimized_mir(tcx, def_id)
+            };
+        });
         config.register_lints = Some(Box::new(move |_, lint_store| {
             lint_store.register_lints(&[&INCORRECT_ATTRIBUTE]);
             lint_store.register_lints(&[&infallible_allocation::INFALLIBLE_ALLOCATION]);
