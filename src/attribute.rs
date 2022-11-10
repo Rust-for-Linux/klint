@@ -103,6 +103,23 @@ pub fn parse_klint_attribute(
                         );
                         None
                     };
+
+                    let negative = if matches!(
+                        cursor.look_ahead(0),
+                        Some(TokenTree::Token(
+                            token::Token {
+                                kind: token::TokenKind::BinOp(token::BinOpToken::Minus),
+                                ..
+                            },
+                            _
+                        ))
+                    ) {
+                        cursor.next();
+                        true
+                    } else {
+                        false
+                    };
+
                     let Some(token) = cursor.next() else { return expect_int(delim_span.close) };
                     let TokenTree::Token(
                         token::Token {
@@ -117,6 +134,7 @@ pub fn parse_klint_attribute(
                     let Some(v) = lit.symbol.as_str().parse::<i32>().ok() else {
                         return expect_int(token.span());
                     };
+                    let v = if negative { -v } else { v };
                     adjustment = Some(v);
                 } else {
                     // Parse assumption, which is a range.
