@@ -12,6 +12,10 @@ use rustc_middle::ty::{self, TyCtxt};
 use rustc_span::def_id::{DefId, LocalDefId};
 use rustc_span::sym;
 
+mod serde;
+
+use crate::ctxt::AnalysisCtxt;
+
 // HACK: we can't add new queries to `TyCtxt` without changing rustc code, so
 // use this as a "poor man's query" for now.
 //
@@ -20,45 +24,7 @@ use rustc_span::sym;
 static MIR_CACHE: LazyLock<Mutex<FxHashMap<LocalDefId, AtomicPtr<()>>>> =
     LazyLock::new(|| Mutex::new(FxHashMap::default()));
 
-pub fn analysis_mir<'tcx>(tcx: TyCtxt<'tcx>, did: DefId) -> &'tcx Body<'tcx> {
-    match did.as_local() {
-        Some(local_def_id) => local_analysis_mir(tcx, local_def_id),
-        None => tcx.optimized_mir(did),
-    }
-}
-
-pub fn analysis_instance_mir<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    instance: ty::InstanceDef<'tcx>,
-) -> &'tcx Body<'tcx> {
-    match instance {
-        ty::InstanceDef::Item(def) => {
-            let def_kind = tcx.def_kind(def.did);
-            match def_kind {
-                DefKind::Const
-                | DefKind::Static(..)
-                | DefKind::AssocConst
-                | DefKind::Ctor(..)
-                | DefKind::AnonConst
-                | DefKind::InlineConst => tcx.mir_for_ctfe_opt_const_arg(def),
-                _ => {
-                    assert_eq!(def.const_param_did, None);
-                    analysis_mir(tcx, def.did)
-                }
-            }
-        }
-        ty::InstanceDef::VTableShim(..)
-        | ty::InstanceDef::ReifyShim(..)
-        | ty::InstanceDef::Intrinsic(..)
-        | ty::InstanceDef::FnPtrShim(..)
-        | ty::InstanceDef::Virtual(..)
-        | ty::InstanceDef::ClosureOnceShim { .. }
-        | ty::InstanceDef::DropGlue(..)
-        | ty::InstanceDef::CloneShim(..) => tcx.mir_shims(instance),
-    }
-}
-
-fn local_analysis_mir<'tcx>(tcx: TyCtxt<'tcx>, did: LocalDefId) -> &'tcx Body<'tcx> {
+pub fn local_analysis_mir<'tcx>(tcx: TyCtxt<'tcx>, did: LocalDefId) -> &'tcx Body<'tcx> {
     if tcx.is_constructor(did.to_def_id()) {
         return tcx.optimized_mir(did.to_def_id());
     }
@@ -142,4 +108,112 @@ fn remap_mir_for_const_eval_select<'tcx>(
         }
     }
     body
+}
+
+memoize! {
+    fn analysis_mir<'tcx>(cx: &AnalysisCtxt<'tcx>, def_id: DefId) -> &'tcx Body<'tcx> {
+        if let Some(local_def_id) = def_id.as_local() {
+            local_analysis_mir(cx.tcx, local_def_id)
+        } else if let Some(mir) = cx.load_mir(def_id) {
+            mir
+        } else {
+            cx.optimized_mir(def_id)
+        }
+    }
+}
+
+impl<'tcx> AnalysisCtxt<'tcx> {
+    #[instrument(skip(self, mir))]
+    fn store_mir(&self, def_id: DefId, mir: &Body<'tcx>) {
+        use rustc_serialize::Encodable;
+
+        let mut enc = self::serde::EncodeContext::new(self.tcx);
+        mir.encode(&mut enc);
+        let enc_result = enc.finish();
+        self.sql_conn
+            .execute(
+                "INSERT OR REPLACE INTO mir (stable_crate_id, local_def_id, mir) VALUES (?, ?, ?)",
+                rusqlite::params![
+                    self.tcx.stable_crate_id(def_id.krate).to_u64() as i64,
+                    def_id.index.as_u32(),
+                    enc_result,
+                ],
+            )
+            .unwrap();
+    }
+
+    #[instrument(skip(self))]
+    fn load_mir(&self, def_id: DefId) -> Option<&'tcx Body<'tcx>> {
+        use rusqlite::OptionalExtension;
+        use rustc_serialize::Decodable;
+
+        let mir_enc: Vec<u8> = self
+            .sql_conn
+            .query_row(
+                "SELECT mir FROM mir WHERE stable_crate_id = ? AND local_def_id = ?",
+                rusqlite::params![
+                    self.tcx.stable_crate_id(def_id.krate).to_u64() as i64,
+                    def_id.index.as_u32()
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()?;
+        let _ = self.tcx.optimized_mir(def_id);
+        let mut dec = self::serde::DecodeContext::new(self.tcx, &mir_enc);
+        let mir = <&Body<'tcx>>::decode(&mut dec);
+        Some(mir)
+    }
+
+    /// Save all MIRs defined in the current crate to the database.
+    pub fn encode_mir(&self) {
+        let tcx = self.tcx;
+        for &def_id in tcx.mir_keys(()) {
+            // Use the same logic as rustc use to determine if the MIR is needed for
+            // downstream crates.
+            let should_encode = match tcx.def_kind(def_id) {
+                DefKind::Ctor(_, _) | DefKind::Generator => true,
+                DefKind::AssocFn | DefKind::Fn | DefKind::Closure => {
+                    let generics = tcx.generics_of(def_id);
+                    let needs_inline = generics.requires_monomorphization(tcx)
+                        || tcx.codegen_fn_attrs(def_id).requests_inline();
+                    needs_inline
+                }
+                _ => false,
+            };
+
+            if should_encode {
+                let mir = self.analysis_mir(def_id.into());
+                self.store_mir(def_id.into(), mir);
+            }
+        }
+    }
+
+    pub fn analysis_instance_mir(&self, instance: ty::InstanceDef<'tcx>) -> &'tcx Body<'tcx> {
+        match instance {
+            ty::InstanceDef::Item(def) => {
+                let def_kind = self.def_kind(def.did);
+                match def_kind {
+                    DefKind::Const
+                    | DefKind::Static(..)
+                    | DefKind::AssocConst
+                    | DefKind::Ctor(..)
+                    | DefKind::AnonConst
+                    | DefKind::InlineConst => self.mir_for_ctfe_opt_const_arg(def),
+                    _ => {
+                        assert_eq!(def.const_param_did, None);
+                        self.analysis_mir(def.did)
+                    }
+                }
+            }
+            ty::InstanceDef::VTableShim(..)
+            | ty::InstanceDef::ReifyShim(..)
+            | ty::InstanceDef::Intrinsic(..)
+            | ty::InstanceDef::FnPtrShim(..)
+            | ty::InstanceDef::Virtual(..)
+            | ty::InstanceDef::ClosureOnceShim { .. }
+            | ty::InstanceDef::DropGlue(..)
+            | ty::InstanceDef::CloneShim(..) => self.mir_shims(instance),
+        }
+    }
 }

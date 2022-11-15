@@ -790,21 +790,18 @@ impl<'tcx> AtomicContext<'tcx> {
             );
         }
 
+        if !crate::monomorphize_collector::should_codegen_locally(self.tcx, &instance) {
+            warn!(
+                "Unable to compute property of non-local function {:?}",
+                instance
+            );
+            return Some(Default::default());
+        }
+
         let mir = match instance.def {
-            ty::InstanceDef::DropGlue(_, _) => {
-                crate::mir::analysis_instance_mir(self.tcx, instance.def)
-            }
-            ty::InstanceDef::Item(def_id) => match self.cx.analysis_mir(def_id.did) {
-                Some(v) => v,
-                _ => {
-                    warn!(
-                        "Unable to compute property of non-local function {:?}",
-                        instance
-                    );
-                    return Some(Default::default());
-                }
-            },
-            _ => crate::mir::analysis_instance_mir(self.tcx, instance.def),
+            ty::InstanceDef::DropGlue(_, _) => self.cx.analysis_instance_mir(instance.def),
+            ty::InstanceDef::Item(def_id) => self.cx.analysis_mir(def_id.did),
+            _ => self.cx.analysis_instance_mir(instance.def),
         };
 
         info!(?instance);

@@ -35,13 +35,14 @@ use rustc_driver::Callbacks;
 use rustc_interface::interface::Config;
 use std::sync::atomic::Ordering;
 
+#[macro_use]
+mod ctxt;
+
 mod atomic_context;
 mod attribute;
-mod ctxt;
 mod infallible_allocation;
 mod mir;
 mod monomorphize_collector;
-mod serde;
 mod symbol;
 mod util;
 
@@ -66,7 +67,7 @@ impl Callbacks for MyCallbacks {
                 // Skip `analysis_mir` call if this is a constructor, since it will be delegated back to
                 // `optimized_mir` for building ADT constructor shim.
                 if !tcx.is_constructor(def_id) {
-                    crate::mir::analysis_mir(tcx, def_id);
+                    crate::mir::local_analysis_mir(tcx, def_id.expect_local());
                 }
 
                 let ptr = ORIGINAL_OPTIMIZED_MIR.load(Ordering::Relaxed);
