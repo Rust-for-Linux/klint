@@ -14,6 +14,9 @@ use rustc_span::sym;
 
 // HACK: we can't add new queries to `TyCtxt` without changing rustc code, so
 // use this as a "poor man's query" for now.
+//
+// `AnalysisCtxt` has its own cache but we can't use it as we've only got `TyCtxt`
+// so far but not `AnalysisCtxt`.
 static MIR_CACHE: LazyLock<Mutex<FxHashMap<LocalDefId, AtomicPtr<()>>>> =
     LazyLock::new(|| Mutex::new(FxHashMap::default()));
 

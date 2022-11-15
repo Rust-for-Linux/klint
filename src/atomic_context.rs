@@ -400,6 +400,7 @@ enum EvaluationStatus<T> {
 
 pub struct AtomicContext<'tcx> {
     tcx: TyCtxt<'tcx>,
+    cx: crate::ctxt::AnalysisCtxt<'tcx>,
     cache: RefCell<FxHashMap<Instance<'tcx>, EvaluationStatus<FunctionContextProperty>>>,
 }
 
@@ -413,6 +414,7 @@ impl<'tcx> AtomicContext<'tcx> {
     pub fn new(tcx: TyCtxt<'tcx>) -> Self {
         Self {
             tcx,
+            cx: crate::ctxt::AnalysisCtxt::new(tcx),
             cache: RefCell::new(FxHashMap::default()),
         }
     }
@@ -878,5 +880,9 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         let identity = InternalSubsts::identity_for_item(self.tcx, def_id.into());
         let instance = Instance::new(def_id.into(), identity);
         self.property(instance);
+    }
+
+    fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
+        self.cx.encode_mir();
     }
 }
