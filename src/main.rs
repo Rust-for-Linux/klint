@@ -1,5 +1,6 @@
 #![feature(rustc_private)]
 #![feature(once_cell)]
+#![feature(min_specialization)]
 #![feature(box_patterns)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
@@ -18,6 +19,7 @@ extern crate rustc_lint;
 extern crate rustc_middle;
 extern crate rustc_mir_dataflow;
 extern crate rustc_monomorphize;
+extern crate rustc_serialize;
 extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_target;
@@ -38,6 +40,7 @@ mod attribute;
 mod infallible_allocation;
 mod mir;
 mod monomorphize_collector;
+mod serde;
 mod symbol;
 mod util;
 
