@@ -1,16 +1,17 @@
 use std::cell::{Cell, RefCell};
 
 use rustc_data_structures::fx::FxHashMap;
+use rustc_hir::def_id::DefId;
 use rustc_hir::LangItem;
 use rustc_index::bit_set::BitSet;
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_mir_dataflow::lattice::MeetSemiLattice;
-use rustc_mir_dataflow::JoinSemiLattice;
-use rustc_session::{declare_tool_lint, impl_lint_pass};
-
+use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::mir::{BasicBlock, Body, Terminator, TerminatorKind};
 use rustc_middle::ty::{self, Instance, InternalSubsts, TyCtxt};
+use rustc_mir_dataflow::lattice::MeetSemiLattice;
+use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
+use rustc_session::{declare_tool_lint, impl_lint_pass};
 
 // A description of how atomic context analysis works.
 //
@@ -401,6 +402,7 @@ enum EvaluationStatus<T> {
 pub struct AtomicContext<'tcx> {
     tcx: TyCtxt<'tcx>,
     cx: crate::ctxt::AnalysisCtxt<'tcx>,
+    annotatation: RefCell<FxHashMap<DefId, (Option<i32>, Option<PreemptionCountRange>)>>,
     cache: RefCell<FxHashMap<Instance<'tcx>, EvaluationStatus<FunctionContextProperty>>>,
 }
 
@@ -415,6 +417,7 @@ impl<'tcx> AtomicContext<'tcx> {
         Self {
             tcx,
             cx: crate::ctxt::AnalysisCtxt::new(tcx),
+            annotatation: RefCell::new(FxHashMap::default()),
             cache: RefCell::new(FxHashMap::default()),
         }
     }
@@ -425,7 +428,7 @@ impl<'tcx> AtomicContext<'tcx> {
         body: &Body<'tcx>,
         terminator: &Terminator<'tcx>,
     ) -> Option<ResolveResult<'tcx>> {
-        match &terminator.kind {
+        let func = match &terminator.kind {
             TerminatorKind::Call { func, .. } => {
                 let callee_ty = func.ty(body, self.tcx);
                 let callee_ty = instance.subst_mir_and_normalize_erasing_regions(
@@ -438,14 +441,18 @@ impl<'tcx> AtomicContext<'tcx> {
                         ty::Instance::resolve(self.tcx, ty::ParamEnv::reveal_all(), def_id, substs)
                             .unwrap();
                     match func {
-                        Some(func) => Some(ResolveResult::Ok(func)),
+                        Some(func) => func,
                         None => {
                             warn!("Resolving function {callee_ty} returns too generic");
-                            Some(ResolveResult::TooGeneric)
+                            return Some(ResolveResult::TooGeneric);
                         }
                     }
                 } else {
-                    Some(ResolveResult::IndirectCall)
+                    self.tcx.sess.span_warn(
+                        terminator.source_info.span,
+                        "klint cannot yet check indirect function calls",
+                    );
+                    return Some(ResolveResult::IndirectCall);
                 }
             }
             TerminatorKind::Drop { place, .. } => {
@@ -464,14 +471,37 @@ impl<'tcx> AtomicContext<'tcx> {
                         .unwrap();
 
                 match func {
-                    Some(func) => Some(ResolveResult::Ok(func)),
+                    Some(func) => func,
                     None => {
                         warn!("Resolving drop of {ty:?} returns too generic");
-                        Some(ResolveResult::TooGeneric)
+                        return Some(ResolveResult::TooGeneric);
                     }
                 }
             }
-            _ => None,
+            _ => return None,
+        };
+        match func.def {
+            ty::InstanceDef::Virtual(..) => {
+                self.tcx.sess.span_warn(
+                    terminator.source_info.span,
+                    "klint cannot yet check indirect function calls",
+                );
+                Some(ResolveResult::IndirectCall)
+            }
+            ty::InstanceDef::DropGlue(_, Some(v))
+                if !v.is_sized(
+                    self.tcx.at(terminator.source_info.span),
+                    ty::ParamEnv::reveal_all(),
+                ) =>
+            {
+                // Drop of DST will recreate a self-recursive
+                self.tcx.sess.span_warn(
+                    terminator.source_info.span,
+                    format!("klint cannot yet check DST drop (type = {v})"),
+                );
+                Some(ResolveResult::IndirectCall)
+            }
+            _ => Some(ResolveResult::Ok(func)),
         }
     }
 
@@ -745,13 +775,39 @@ impl<'tcx> AtomicContext<'tcx> {
             return Some(self.ffi_property(&name));
         }
 
-        if !crate::monomorphize_collector::should_codegen_locally(self.tcx, &instance) {
-            return Some(Default::default());
+        // None indicates that we need to infer them.
+        let mut adjustment = None;
+        let mut assumption = None;
+
+        // Use annotation if available.
+        let def_id = instance.def_id();
+        if let Some((adj, assume)) = self.annotatation.borrow().get(&def_id) {
+            adjustment = *adj;
+            assumption = *assume;
+            info!(
+                "adjustment {:?} and assumption {:?} from annotation",
+                adjustment, assumption
+            );
         }
 
-        // dbg!(instance);
-        let mir = self.tcx.instance_mir(instance.def);
-        // dbg!(mir);
+        let mir = match instance.def {
+            ty::InstanceDef::DropGlue(_, _) => {
+                crate::mir::analysis_instance_mir(self.tcx, instance.def)
+            }
+            ty::InstanceDef::Item(def_id) => match self.cx.analysis_mir(def_id.did) {
+                Some(v) => v,
+                _ => {
+                    warn!(
+                        "Unable to compute property of non-local function {:?}",
+                        instance
+                    );
+                    return Some(Default::default());
+                }
+            },
+            _ => crate::mir::analysis_instance_mir(self.tcx, instance.def),
+        };
+
+        info!(?instance);
         let analysis_result = AdjustmentComputation {
             checker: self,
             body: mir,
@@ -771,89 +827,96 @@ impl<'tcx> AtomicContext<'tcx> {
         }
 
         // Gather adjustments.
-        let mut adjustment = AdjustmentBounds::default();
-        for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
-            match data.terminator().kind {
-                TerminatorKind::Return => {
-                    adjustment.join(analysis_result.results().entry_set_for_block(b));
+        if adjustment.is_none() {
+            let mut adjustment_infer = AdjustmentBounds::default();
+            for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
+                match data.terminator().kind {
+                    TerminatorKind::Return => {
+                        adjustment_infer.join(analysis_result.results().entry_set_for_block(b));
+                    }
+                    _ => (),
                 }
-                _ => (),
             }
+
+            let adjustment_infer = if adjustment_infer.is_empty() {
+                // Diverging function, any value is fine, use the default 0.
+                0
+            } else if let Some(v) = adjustment_infer.is_single_value() {
+                v
+            } else {
+                self.report_adjustment_infer_error(instance, mir, &analysis_result);
+                0
+            };
+
+            adjustment = Some(adjustment_infer);
         }
 
-        let adjustment = if adjustment.is_empty() {
-            // Diverging function, any value is fine, use the default 0.
-            0
-        } else if let Some(v) = adjustment.is_single_value() {
-            v
-        } else {
-            self.report_adjustment_infer_error(instance, mir, &analysis_result);
-            0
-        };
-
         // Gather assumptions.
-        let mut assumption = PreemptionCountRange::top();
-        for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
-            if data.is_cleanup {
-                continue;
-            }
-
-            match self.resolve_function_property(instance, mir, data.terminator()) {
-                Some(Some(prop)) => {
-                    let adj = *analysis_result.results().entry_set_for_block(b);
-
-                    // We need to find a range that for all possible values in `adj`, it will end up in a value
-                    // that lands inside `prop.assumption`.
-                    //
-                    // For example, if adjustment is `0..`, and range is `0..1`, then the range we want is `0..0`,
-                    // i.e. an empty range, because no matter what preemption count we start with, if we apply an
-                    // adjustment >0, then it will be outside the range.
-                    let mut expected = prop.assumption - adj;
-                    expected.meet(&assumption);
-                    if expected.is_empty() {
-                        // This function will cause the entry state to be in an unsatisfiable condition.
-                        // Generate an error.
-                        let (kind, drop_span) = match data.terminator().kind {
-                            TerminatorKind::Drop { place, .. } => {
-                                ("drop", Some(mir.local_decls[place.local].source_info.span))
-                            }
-                            _ => ("call", None),
-                        };
-                        let span = data.terminator().source_info.span;
-                        let mut diag = self.tcx.sess.struct_span_err(
-                            span,
-                            format!(
-                                "this {kind} expects the preemption count to be {}",
-                                prop.assumption
-                            ),
-                        );
-
-                        if let Some(span) = drop_span {
-                            diag.span_label(span, "the value being dropped is declared here");
-                        }
-
-                        diag.note(format!(
-                            "but the possible preemption count at this point is {}",
-                            assumption + adj
-                        ));
-                        diag.emit();
-
-                        // For failed inference, revert to the default.
-                        assumption = PreemptionCountRange { lo: 0, hi: None };
-
-                        // Stop processing other calls in this function to avoid generating too many errors.
-                        break;
-                    }
-                    assumption = expected;
+        if assumption.is_none() {
+            let mut assumption_infer = PreemptionCountRange::top();
+            for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
+                if data.is_cleanup {
+                    continue;
                 }
-                Some(None) => unreachable!(),
-                None => (),
+
+                match self.resolve_function_property(instance, mir, data.terminator()) {
+                    Some(Some(prop)) => {
+                        let adj = *analysis_result.results().entry_set_for_block(b);
+
+                        // We need to find a range that for all possible values in `adj`, it will end up in a value
+                        // that lands inside `prop.assumption`.
+                        //
+                        // For example, if adjustment is `0..`, and range is `0..1`, then the range we want is `0..0`,
+                        // i.e. an empty range, because no matter what preemption count we start with, if we apply an
+                        // adjustment >0, then it will be outside the range.
+                        let mut expected = prop.assumption - adj;
+                        expected.meet(&assumption_infer);
+                        if expected.is_empty() {
+                            // This function will cause the entry state to be in an unsatisfiable condition.
+                            // Generate an error.
+                            let (kind, drop_span) = match data.terminator().kind {
+                                TerminatorKind::Drop { place, .. } => {
+                                    ("drop", Some(mir.local_decls[place.local].source_info.span))
+                                }
+                                _ => ("call", None),
+                            };
+                            let span = data.terminator().source_info.span;
+                            let mut diag = self.tcx.sess.struct_span_err(
+                                span,
+                                format!(
+                                    "this {kind} expects the preemption count to be {}",
+                                    prop.assumption
+                                ),
+                            );
+
+                            if let Some(span) = drop_span {
+                                diag.span_label(span, "the value being dropped is declared here");
+                            }
+
+                            diag.note(format!(
+                                "but the possible preemption count at this point is {}",
+                                assumption_infer + adj
+                            ));
+                            diag.emit();
+
+                            // For failed inference, revert to the default.
+                            assumption_infer = PreemptionCountRange { lo: 0, hi: None };
+
+                            // Stop processing other calls in this function to avoid generating too many errors.
+                            break;
+                        }
+                        assumption_infer = expected;
+                    }
+                    Some(None) => unreachable!(),
+                    None => (),
+                }
             }
+            assumption = Some(assumption_infer);
         }
 
         Some(FunctionContextProperty {
-            assumption,
-            adjustment,
+            assumption: assumption.unwrap(),
+            adjustment: adjustment.unwrap(),
         })
     }
 }
@@ -868,8 +931,22 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         _: &'tcx rustc_hir::FnDecl<'tcx>,
         body: &'tcx rustc_hir::Body<'tcx>,
         _: rustc_span::Span,
-        _: rustc_hir::HirId,
+        hir_id: rustc_hir::HirId,
     ) {
+        for attr in self.tcx.hir().attrs(hir_id) {
+            let Some(attr) = crate::attribute::parse_klint_attribute(cx, attr) else { continue };
+            match attr {
+                crate::attribute::KlintAttribute::PreemptionCount {
+                    adjustment,
+                    assumption,
+                } => {
+                    self.annotatation.borrow_mut().insert(
+                        self.tcx.hir().local_def_id(hir_id).to_def_id(),
+                        (adjustment, assumption),
+                    );
+                }
+            }
+        }
         let def_id = cx.tcx.hir().body_owner_def_id(body.id());
 
         // Building MIR for `fn`s with unsatisfiable preds results in ICE.
@@ -883,6 +960,18 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
     }
 
     fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
+        let mono_items = super::monomorphize_collector::collect_crate_mono_items(
+            cx.tcx,
+            crate::monomorphize_collector::MonoItemCollectionMode::Eager,
+        )
+        .0;
+
+        for mono_item in mono_items {
+            if let MonoItem::Fn(instance) = mono_item {
+                self.property(instance);
+            }
+        }
+
         self.cx.encode_mir();
     }
 }
