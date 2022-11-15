@@ -297,7 +297,11 @@ impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for Span {
                         None,
                     ),
                     None => {
-                        warn!("cannot load source file {:?}", stable_source_file_id);
+                        info!(
+                            "cannot load source file {:?} (crate {:?})",
+                            stable_source_file_id,
+                            decoder.tcx.crate_name(stable_source_file_id.cnum)
+                        );
                         DUMMY_SP
                     }
                 }
