@@ -99,7 +99,16 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 .unwrap();
         }
 
-        conn.execute("begin", ()).unwrap();
+        loop {
+            match conn.execute("begin immediate", ()) {
+                Err(err) if err.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy) => {
+                    info!("Unable to acquire database lock, retrying");
+                    continue;
+                }
+                Ok(_) => break,
+                Err(err) => bug!("Failed to begin transaction: {}", err),
+            }
+        }
 
         Self {
             tcx,
