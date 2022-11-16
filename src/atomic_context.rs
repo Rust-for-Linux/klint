@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use rustc_hir::def_id::LocalDefId;
+use rustc_hir::def_id::DefId;
 use rustc_hir::LangItem;
 use rustc_index::bit_set::BitSet;
 use rustc_lint::{LateContext, LateLintPass};
@@ -546,7 +546,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 adjustment: 0,
             },
             _ => {
-                info!("Unable to determine property for FFI function `{}`", symbol);
+                warn!("Unable to determine property for FFI function `{}`", symbol);
 
                 // Other functions, assume no context change for now.
                 FunctionContextProperty {
@@ -722,21 +722,14 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             _ => (),
         }
 
-        // None indicates that we need to infer them.
-        let mut adjustment = None;
-        let mut assumption = None;
-
         // Use annotation if available.
         let def_id = instance.def_id();
-        if let Some(local_def_id) = def_id.as_local() {
-            (adjustment, assumption) = self.preemption_count_annotation(local_def_id);
-
-            if adjustment.is_some() || assumption.is_some() {
-                info!(
-                    "adjustment {:?} and assumption {:?} from annotation",
-                    adjustment, assumption
-                );
-            }
+        let (mut adjustment, mut assumption) = self.preemption_count_annotation(def_id);
+        if adjustment.is_some() || assumption.is_some() {
+            info!(
+                "adjustment {:?} and assumption {:?} from annotation",
+                adjustment, assumption
+            );
         }
 
         assert!(crate::monomorphize_collector::should_codegen_locally(
@@ -1000,13 +993,86 @@ impl<'tcx> AtomicContext<'tcx> {
 
 impl_lint_pass!(AtomicContext<'_> => [ATOMIC_CONTEXT]);
 
+impl<'tcx> AnalysisCtxt<'tcx> {
+    #[instrument(skip(self))]
+    fn store_preemption_count_annotation(
+        &self,
+        def_id: DefId,
+        annotation: (Option<i32>, Option<PreemptionCountRange>),
+    ) {
+        self.sql_conn
+            .execute(
+                "INSERT OR REPLACE INTO preemption_count_annotation (stable_crate_id, local_def_id, adjustment, assumption_lo, assumption_hi) VALUES (?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    self.tcx.stable_crate_id(def_id.krate).to_u64() as i64,
+                    def_id.index.as_u32(),
+                    annotation.0,
+                    annotation.1.map(|r| r.lo),
+                    annotation.1.and_then(|r| r.hi),
+                ],
+            )
+            .unwrap();
+    }
+
+    #[instrument(skip(self))]
+    fn load_preemption_count_annotation(
+        &self,
+        def_id: DefId,
+    ) -> Option<(Option<i32>, Option<PreemptionCountRange>)> {
+        use rusqlite::OptionalExtension;
+
+        self
+            .sql_conn
+            .query_row(
+                "SELECT adjustment, assumption_lo, assumption_hi FROM preemption_count_annotation WHERE stable_crate_id = ? AND local_def_id = ?",
+                rusqlite::params![
+                    self.tcx.stable_crate_id(def_id.krate).to_u64() as i64,
+                    def_id.index.as_u32(),
+                ],
+                |row| {
+                    let adjustment = row.get(0)?;
+                    let assumption_lo: Option<u32> = row.get(1)?;
+                    let assumption_hi = row.get(2)?;
+                    Ok((adjustment, assumption_lo.map(|lo| PreemptionCountRange { lo, hi: assumption_hi })))
+                },
+            )
+            .optional()
+            .unwrap()
+    }
+
+    fn preemption_count_annotation_fallback(
+        &self,
+        def_id: DefId,
+    ) -> (Option<i32>, Option<PreemptionCountRange>) {
+        match self.crate_name(def_id.krate).as_str() {
+            // Happens in a test environment where build-std is not enabled.
+            "core" | "alloc" | "std" => (),
+            _ => {
+                warn!(
+                    "Unable to retrieve preemption count annotation of non-local function {:?}",
+                    def_id
+                );
+            }
+        }
+        (None, None)
+    }
+}
+
 memoize! {
     fn preemption_count_annotation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
-        def_id: LocalDefId,
+        def_id: DefId,
     ) -> (Option<i32>, Option<PreemptionCountRange>) {
+        let Some(local_def_id) = def_id.as_local() else {
+            if let Some(v) = cx.load_preemption_count_annotation(def_id) {
+                return v;
+            }
+            return cx.preemption_count_annotation_fallback(def_id);
+        };
+
         let hir = cx.hir();
-        let hir_id = hir.local_def_id_to_hir_id(def_id);
+        let hir_id = hir.local_def_id_to_hir_id(local_def_id);
+        let mut value = (None, None);
         for attr in hir.attrs(hir_id) {
             let Some(attr) = crate::attribute::parse_klint_attribute(cx.tcx, hir_id, attr) else { continue };
             match attr {
@@ -1014,11 +1080,13 @@ memoize! {
                     adjustment,
                     assumption,
                 } => {
-                    return (adjustment, assumption);
+                    value = (adjustment, assumption);
+                    break;
                 }
             }
         }
-        (None, None)
+
+        value
     }
 }
 
@@ -1063,5 +1131,11 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         }
 
         self.cx.encode_mir();
+
+        for &def_id in self.cx.mir_keys(()) {
+            let annotation = self.cx.preemption_count_annotation(def_id.to_def_id());
+            self.cx
+                .store_preemption_count_annotation(def_id.to_def_id(), annotation);
+        }
     }
 }
