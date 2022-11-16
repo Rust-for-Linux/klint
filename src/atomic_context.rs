@@ -505,27 +505,49 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         }
     }
 
-    fn ffi_property(&self, symbol: &str) -> FunctionContextProperty {
+    fn ffi_property(&self, instance: Instance<'tcx>) -> FunctionContextProperty {
+        let symbol = self.symbol_name(instance).name;
+
+        // Skip LLVM intrinsics
+        if symbol.starts_with("llvm.") {
+            return Default::default();
+        }
+
         match symbol {
-            "enter_atomic" | "bindings::spin_lock" => FunctionContextProperty {
+            // Interfacing between libcore and panic runtime
+            "rust_begin_unwind" => Default::default(),
+            // Basic string operations depended by libcore.
+            "memcmp" => Default::default(),
+
+            // Memory allocations glues depended by liballoc.
+            // Allocation functions may sleep.
+            "__rust_alloc" | "__rust_alloc_zeroed" | "__rust_realloc" => FunctionContextProperty {
+                assumption: PreemptionCountRange::single_value(0),
+                adjustment: 0,
+            },
+
+            // Deallocation function will not sleep.
+            "__rust_dealloc" => Default::default(),
+
+            "spin_lock" => FunctionContextProperty {
                 assumption: PreemptionCountRange::top(),
                 adjustment: 1,
             },
-            "leave_atomic" | "bindings::spin_unlock" => FunctionContextProperty {
+            "spin_unlock" => FunctionContextProperty {
                 assumption: PreemptionCountRange { lo: 1, hi: None },
                 adjustment: -1,
             },
-            "require_atomic" => FunctionContextProperty {
+            "__cant_sleep" => FunctionContextProperty {
                 assumption: PreemptionCountRange { lo: 1, hi: None },
                 adjustment: 0,
             },
-            "require_not_atomic" | "bindings::msleep" => FunctionContextProperty {
+            "__might_sleep" | "msleep" => FunctionContextProperty {
                 assumption: PreemptionCountRange::single_value(0),
                 adjustment: 0,
             },
             _ => {
-                warn!(symbol);
-                // dbg!(symbol);
+                info!("Unable to determine property for FFI function `{}`", symbol);
+
                 // Other functions, assume no context change for now.
                 FunctionContextProperty {
                     assumption: PreemptionCountRange::top(),
@@ -922,8 +944,7 @@ memoize! {
         }
 
         if cx.is_foreign_item(instance.def_id()) {
-            let name = cx.def_path_str(instance.def_id());
-            return Some(cx.ffi_property(&name));
+            return Some(cx.ffi_property(instance));
         }
 
         if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
