@@ -1,5 +1,6 @@
 use rustc_ast::{ast, token, tokenstream::TokenTree};
-use rustc_lint::{LateContext, LintContext};
+use rustc_hir::HirId;
+use rustc_middle::ty::TyCtxt;
 
 use crate::atomic_context::PreemptionCountRange;
 
@@ -12,7 +13,8 @@ pub enum KlintAttribute {
 }
 
 pub fn parse_klint_attribute(
-    cx: &LateContext<'_>,
+    tcx: TyCtxt<'_>,
+    hir_id: HirId,
     attr: &ast::Attribute,
 ) -> Option<KlintAttribute> {
     let ast::AttrKind::Normal(normal_attr) = &attr.kind else { return None };
@@ -21,8 +23,9 @@ pub fn parse_klint_attribute(
         return None;
     };
     if item.path.segments.len() != 2 {
-        cx.struct_span_lint(
+        tcx.struct_span_lint_hir(
             crate::INCORRECT_ATTRIBUTE,
+            hir_id,
             attr.span,
             "invalid klint attribute",
             |diag| diag,
@@ -35,8 +38,9 @@ pub fn parse_klint_attribute(
             let mut assumption = None;
 
             let ast::MacArgs::Delimited(delim_span, _, tts) = &item.args else {
-                cx.struct_span_lint(
+                tcx.struct_span_lint_hir(
                     crate::INCORRECT_ATTRIBUTE,
+                    hir_id,
                     attr.span,
                     "incorrect usage of `#[kint::preemption_count]`",
                     |diag| {
@@ -49,8 +53,9 @@ pub fn parse_klint_attribute(
             let mut cursor = tts.trees();
             while let Some(prop) = cursor.next() {
                 let invalid_prop = |span| {
-                    cx.struct_span_lint(
+                    tcx.struct_span_lint_hir(
                         crate::INCORRECT_ATTRIBUTE,
+                        hir_id,
                         span,
                         "incorrect usage of `#[kint::preemption_count]`",
                         |diag| diag.help("`adjust` or `assume` expected"),
@@ -70,8 +75,9 @@ pub fn parse_klint_attribute(
 
                 // Check and skip `=`.
                 let expect_eq = |span| {
-                    cx.struct_span_lint(
+                    tcx.struct_span_lint_hir(
                         crate::INCORRECT_ATTRIBUTE,
+                        hir_id,
                         span,
                         "incorrect usage of `#[kint::preemption_count]`",
                         |diag| diag.help("`=` expected after property name"),
@@ -95,8 +101,9 @@ pub fn parse_klint_attribute(
                 if !assume {
                     // Parse adjustment, which is a single integer literal.
                     let expect_int = |span| {
-                        cx.struct_span_lint(
+                        tcx.struct_span_lint_hir(
                             crate::INCORRECT_ATTRIBUTE,
+                            hir_id,
                             span,
                             "incorrect usage of `#[kint::preemption_count]`",
                             |diag| diag.help("an integer expected as the value of `adjust`"),
@@ -139,8 +146,9 @@ pub fn parse_klint_attribute(
                 } else {
                     // Parse assumption, which is a range.
                     let expect_range = |span| {
-                        cx.struct_span_lint(
+                        tcx.struct_span_lint_hir(
                             crate::INCORRECT_ATTRIBUTE,
+                            hir_id,
                             span,
                             "incorrect usage of `#[kint::preemption_count]`",
                             |diag| diag.help("a range expected as the value of `assume`"),
@@ -240,8 +248,9 @@ pub fn parse_klint_attribute(
                     if end.is_some() && end.unwrap() <= start {
                         let end_span = cursor.next().map(|t| t.span()).unwrap_or(delim_span.close);
 
-                        cx.struct_span_lint(
+                        tcx.struct_span_lint_hir(
                             crate::INCORRECT_ATTRIBUTE,
+                            hir_id,
                             start_span.until(end_span),
                             "incorrect usage of `#[kint::preemption_count]`",
                             |diag| {
@@ -260,8 +269,9 @@ pub fn parse_klint_attribute(
 
                 // Check and skip `,`.
                 let expect_comma = |span| {
-                    cx.struct_span_lint(
+                    tcx.struct_span_lint_hir(
                         crate::INCORRECT_ATTRIBUTE,
+                        hir_id,
                         span,
                         "incorrect usage of `#[kint::preemption_count]`",
                         |diag| diag.help("`,` expected between property values"),
@@ -285,8 +295,9 @@ pub fn parse_klint_attribute(
             }
 
             if adjustment.is_none() && assumption.is_none() {
-                cx.struct_span_lint(
+                tcx.struct_span_lint_hir(
                     crate::INCORRECT_ATTRIBUTE,
+                    hir_id,
                     item.args.span().unwrap(),
                     "incorrect usage of `#[kint::preemption_count]`",
                     |diag| diag.help("at least one property must be specified"),
@@ -299,8 +310,9 @@ pub fn parse_klint_attribute(
             })
         }
         _ => {
-            cx.struct_span_lint(
+            tcx.struct_span_lint_hir(
                 crate::INCORRECT_ATTRIBUTE,
+                hir_id,
                 item.path.segments[1].span(),
                 "unrecognized klint attribute",
                 |diag| diag,

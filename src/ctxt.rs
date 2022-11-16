@@ -3,15 +3,23 @@ use std::path::PathBuf;
 
 use rusqlite::Connection;
 use rustc_data_structures::fx::FxHashMap;
-use rustc_hir::def_id::DefId;
+use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_middle::mir;
-use rustc_middle::ty::TyCtxt;
+use rustc_middle::ty::{Instance, TyCtxt};
+
+use crate::atomic_context::{FunctionContextProperty, PreemptionCountRange};
 
 pub struct AnalysisCtxt<'tcx> {
     pub tcx: TyCtxt<'tcx>,
     pub sql_conn: Connection,
 
+    pub eval_stack: RefCell<Vec<Instance<'tcx>>>,
+
     pub analysis_mir: RefCell<FxHashMap<DefId, &'tcx mir::Body<'tcx>>>,
+    pub preemption_count_annotation:
+        RefCell<FxHashMap<LocalDefId, (Option<i32>, Option<PreemptionCountRange>)>>,
+    pub function_context_property:
+        RefCell<FxHashMap<Instance<'tcx>, Option<FunctionContextProperty>>>,
 }
 
 impl<'tcx> std::ops::Deref for AnalysisCtxt<'tcx> {
@@ -23,10 +31,10 @@ impl<'tcx> std::ops::Deref for AnalysisCtxt<'tcx> {
 }
 
 macro_rules! memoize {
-    (fn $name:ident<$tcx: lifetime>($cx:ident: $($_: ty)?, $key:ident: $key_ty:ty) -> $ret: ty { $($body: tt)* }) => {
-        impl<'tcx> AnalysisCtxt<'tcx> {
+    (fn $name:ident<$tcx: lifetime>($cx:ident: $($_: ty)?, $key:ident: $key_ty:ty $(,)?) -> $ret: ty { $($body: tt)* }) => {
+        impl<'tcx> crate::ctxt::AnalysisCtxt<'tcx> {
             pub fn $name(&self, key: $key_ty) -> $ret {
-                fn inner<$tcx>($cx: &AnalysisCtxt<$tcx>, $key: $key_ty) -> $ret {
+                fn inner<$tcx>($cx: &crate::ctxt::AnalysisCtxt<$tcx>, $key: $key_ty) -> $ret {
                     $($body)*
                 }
 
@@ -86,6 +94,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         if schema_ver != SCHEMA_VERSION {
             info!("Creating database schema");
             conn.execute_batch(include_str!("mir/schema.sql")).unwrap();
+            conn.execute_batch(include_str!("schema.sql")).unwrap();
             conn.pragma_update(None, "user_version", &SCHEMA_VERSION)
                 .unwrap();
         }
@@ -95,7 +104,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         Self {
             tcx,
             sql_conn: conn,
+            eval_stack: Default::default(),
             analysis_mir: Default::default(),
+            preemption_count_annotation: Default::default(),
+            function_context_property: Default::default(),
         }
     }
 }

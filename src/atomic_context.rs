@@ -1,7 +1,6 @@
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 
-use rustc_data_structures::fx::FxHashMap;
-use rustc_hir::def_id::DefId;
+use rustc_hir::def_id::LocalDefId;
 use rustc_hir::LangItem;
 use rustc_index::bit_set::BitSet;
 use rustc_lint::{LateContext, LateLintPass};
@@ -11,7 +10,10 @@ use rustc_middle::ty::{self, Instance, InternalSubsts, TyCtxt};
 use rustc_mir_dataflow::lattice::MeetSemiLattice;
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
+use rustc_serialize::{Decodable, Encodable};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
+
+use crate::ctxt::AnalysisCtxt;
 
 // A description of how atomic context analysis works.
 //
@@ -60,8 +62,8 @@ use rustc_session::{declare_tool_lint, impl_lint_pass};
 // point globally in a call graph. This is not very practical, so we would instead require explicit markings on
 // these recursive functions, and if unmarked, assume these functions to make no adjustments to the preemption
 // count and have no assumptions on the preemption count.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Encodable, Decodable)]
 pub struct PreemptionCountRange {
     pub lo: u32,
     pub hi: Option<u32>,
@@ -280,7 +282,7 @@ impl JoinSemiLattice for AdjustmentBounds {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Encodable, Decodable)]
 pub struct FunctionContextProperty {
     /// Range of preemption count that the function expects.
     ///
@@ -302,7 +304,7 @@ impl Default for FunctionContextProperty {
 }
 
 struct AdjustmentComputation<'tcx, 'checker> {
-    checker: &'checker AtomicContext<'tcx>,
+    checker: &'checker AnalysisCtxt<'tcx>,
     body: &'tcx Body<'tcx>,
     instance: Instance<'tcx>,
     too_generic: Cell<bool>,
@@ -393,35 +395,13 @@ declare_tool_lint! {
     ""
 }
 
-enum EvaluationStatus<T> {
-    Complete(T),
-    TooGeneric,
-    Evaluating,
-}
-
-pub struct AtomicContext<'tcx> {
-    tcx: TyCtxt<'tcx>,
-    cx: crate::ctxt::AnalysisCtxt<'tcx>,
-    annotatation: RefCell<FxHashMap<DefId, (Option<i32>, Option<PreemptionCountRange>)>>,
-    cache: RefCell<FxHashMap<Instance<'tcx>, EvaluationStatus<FunctionContextProperty>>>,
-}
-
 enum ResolveResult<'tcx> {
     Ok(Instance<'tcx>),
     TooGeneric,
     IndirectCall,
 }
 
-impl<'tcx> AtomicContext<'tcx> {
-    pub fn new(tcx: TyCtxt<'tcx>) -> Self {
-        Self {
-            tcx,
-            cx: crate::ctxt::AnalysisCtxt::new(tcx),
-            annotatation: RefCell::new(FxHashMap::default()),
-            cache: RefCell::new(FxHashMap::default()),
-        }
-    }
-
+impl<'tcx> AnalysisCtxt<'tcx> {
     fn resolve_function(
         &self,
         instance: Instance<'tcx>,
@@ -512,7 +492,7 @@ impl<'tcx> AtomicContext<'tcx> {
         terminator: &Terminator<'tcx>,
     ) -> Option<Option<FunctionContextProperty>> {
         match self.resolve_function(instance, body, terminator) {
-            Some(ResolveResult::Ok(func)) => match self.property(func) {
+            Some(ResolveResult::Ok(func)) => match self.function_context_property(func) {
                 Some(v) => Some(Some(v)),
                 None => Some(None),
             },
@@ -525,13 +505,13 @@ impl<'tcx> AtomicContext<'tcx> {
         }
     }
 
-    pub fn ffi_property(&self, symbol: &str) -> FunctionContextProperty {
+    fn ffi_property(&self, symbol: &str) -> FunctionContextProperty {
         match symbol {
-            "enter_atomic" => FunctionContextProperty {
+            "enter_atomic" | "bindings::spin_lock" => FunctionContextProperty {
                 assumption: PreemptionCountRange::top(),
                 adjustment: 1,
             },
-            "leave_atomic" => FunctionContextProperty {
+            "leave_atomic" | "bindings::spin_unlock" => FunctionContextProperty {
                 assumption: PreemptionCountRange { lo: 1, hi: None },
                 adjustment: -1,
             },
@@ -539,11 +519,12 @@ impl<'tcx> AtomicContext<'tcx> {
                 assumption: PreemptionCountRange { lo: 1, hi: None },
                 adjustment: 0,
             },
-            "require_not_atomic" => FunctionContextProperty {
+            "require_not_atomic" | "bindings::msleep" => FunctionContextProperty {
                 assumption: PreemptionCountRange::single_value(0),
                 adjustment: 0,
             },
             _ => {
+                warn!(symbol);
                 // dbg!(symbol);
                 // Other functions, assume no context change for now.
                 FunctionContextProperty {
@@ -552,57 +533,6 @@ impl<'tcx> AtomicContext<'tcx> {
                 }
             }
         }
-    }
-
-    pub fn property(&self, instance: Instance<'tcx>) -> Option<FunctionContextProperty> {
-        // First try to resolve the instance with the identity substs.
-        let identity = InternalSubsts::identity_for_item(self.tcx, instance.def_id());
-        if instance.substs != identity {
-            match self.property(Instance::new(instance.def_id(), identity)) {
-                Some(v) => return Some(v),
-                None => (),
-            }
-        }
-
-        // Look up from cache.
-        if let Some(v) = self.cache.borrow_mut().get_mut(&instance) {
-            return match v {
-                EvaluationStatus::Complete(v) => Some(*v),
-                EvaluationStatus::TooGeneric => None,
-                EvaluationStatus::Evaluating => {
-                    // Recursion encountered.
-                    *v = EvaluationStatus::Complete(Default::default());
-                    Some(Default::default())
-                }
-            };
-        }
-
-        self.cache
-            .borrow_mut()
-            .insert(instance, EvaluationStatus::Evaluating);
-        let result = self.compute_property(instance);
-        // Insert into cache, even if the result is `None`, so we don't need to repeat evaluation later.
-        match self.cache.borrow_mut().insert(
-            instance,
-            match result {
-                Some(v) => EvaluationStatus::Complete(v),
-                None => EvaluationStatus::TooGeneric,
-            },
-        ) {
-            Some(EvaluationStatus::Evaluating) => (),
-            _ => {
-                if result != Some(Default::default()) {
-                    let mut diag = self.tcx.sess.struct_span_err(
-                        self.tcx.def_span(instance.def_id()),
-                        "this function is recursive but carries no context specification",
-                    );
-                    diag.note(format!("Inferred as {:?}", result));
-                    diag.emit();
-                }
-                return Some(Default::default());
-            }
-        }
-        result
     }
 
     fn report_adjustment_infer_error(
@@ -770,41 +700,41 @@ impl<'tcx> AtomicContext<'tcx> {
             _ => (),
         }
 
-        if self.tcx.is_foreign_item(instance.def_id()) {
-            let name = self.tcx.def_path_str(instance.def_id());
-            return Some(self.ffi_property(&name));
-        }
-
         // None indicates that we need to infer them.
         let mut adjustment = None;
         let mut assumption = None;
 
         // Use annotation if available.
         let def_id = instance.def_id();
-        if let Some((adj, assume)) = self.annotatation.borrow().get(&def_id) {
-            adjustment = *adj;
-            assumption = *assume;
-            info!(
-                "adjustment {:?} and assumption {:?} from annotation",
-                adjustment, assumption
-            );
+        if let Some(local_def_id) = def_id.as_local() {
+            (adjustment, assumption) = self.preemption_count_annotation(local_def_id);
+
+            if adjustment.is_some() || assumption.is_some() {
+                info!(
+                    "adjustment {:?} and assumption {:?} from annotation",
+                    adjustment, assumption
+                );
+            }
         }
 
-        if !crate::monomorphize_collector::should_codegen_locally(self.tcx, &instance) {
-            warn!(
-                "Unable to compute property of non-local function {:?}",
-                instance
-            );
-            return Some(Default::default());
-        }
+        assert!(crate::monomorphize_collector::should_codegen_locally(
+            self.tcx, &instance
+        ));
 
         let mir = match instance.def {
-            ty::InstanceDef::DropGlue(_, _) => self.cx.analysis_instance_mir(instance.def),
-            ty::InstanceDef::Item(def_id) => self.cx.analysis_mir(def_id.did),
-            _ => self.cx.analysis_instance_mir(instance.def),
+            ty::InstanceDef::DropGlue(_, _) => self.analysis_instance_mir(instance.def),
+            ty::InstanceDef::Item(def_id) => self.analysis_mir(def_id.did),
+            _ => self.analysis_instance_mir(instance.def),
         };
 
         info!(?instance);
+        // rustc_middle::mir::pretty::write_mir_fn(
+        //     self.tcx,
+        //     mir,
+        //     &mut |_, _| Ok(()),
+        //     &mut std::io::stderr(),
+        // )
+        // .unwrap();
         let analysis_result = AdjustmentComputation {
             checker: self,
             body: mir,
@@ -916,9 +846,160 @@ impl<'tcx> AtomicContext<'tcx> {
             adjustment: adjustment.unwrap(),
         })
     }
+
+    #[instrument(skip(self))]
+    fn store_property(&self, instance: Instance<'tcx>, property: Option<FunctionContextProperty>) {
+        let mut enc = crate::serde::EncodeContext::new(self.tcx);
+        instance.encode(&mut enc);
+        let instance_enc = enc.finish();
+
+        let mut enc = crate::serde::EncodeContext::new(self.tcx);
+        property.encode(&mut enc);
+        let property_enc = enc.finish();
+
+        self.sql_conn
+            .execute(
+                "INSERT OR REPLACE INTO function_context_property (instance, property) VALUES (?, ?)",
+                rusqlite::params![
+                    instance_enc,
+                    property_enc,
+                ],
+            )
+            .unwrap();
+    }
+
+    #[instrument(skip(self))]
+    fn load_property(&self, instance: Instance<'tcx>) -> Option<Option<FunctionContextProperty>> {
+        use rusqlite::OptionalExtension;
+
+        let mut enc = crate::serde::EncodeContext::new(self.tcx);
+        instance.encode(&mut enc);
+        let instance_enc = enc.finish();
+
+        let property_enc: Vec<u8> = self
+            .sql_conn
+            .query_row(
+                "SELECT property FROM function_context_property WHERE instance = ?",
+                rusqlite::params![instance_enc,],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()?;
+        let mut dec = crate::serde::DecodeContext::new(self.tcx, &property_enc);
+        let property = <Option<_>>::decode(&mut dec);
+        Some(property)
+    }
+}
+
+memoize! {
+    fn function_context_property<'tcx>(
+        cx: &AnalysisCtxt<'tcx>,
+        instance: Instance<'tcx>,
+    ) -> Option<FunctionContextProperty> {
+        match instance.def {
+            // No Rust built-in intrinsics will mess with preemption count.
+            ty::InstanceDef::Intrinsic(_) => return Some(Default::default()),
+            _ => (),
+        }
+
+        // This will ICE, disable for now.
+        if false {
+            let mut identity = InternalSubsts::identity_for_item(cx.tcx, instance.def_id());
+            if cx.trait_of_item(instance.def_id()).is_some() {
+                // Ensure the `Self` generic arg is kept.
+                identity = cx.intern_substs(
+                    &std::iter::once(instance.substs[0])
+                        .chain(identity[1..].iter().copied())
+                        .collect::<Vec<_>>(),
+                );
+            }
+            if instance.substs != identity {
+                match cx.function_context_property(Instance::new(instance.def_id(), identity)) {
+                    Some(v) => return Some(v),
+                    None => (),
+                }
+            }
+        }
+
+        if cx.is_foreign_item(instance.def_id()) {
+            let name = cx.def_path_str(instance.def_id());
+            return Some(cx.ffi_property(&name));
+        }
+
+        if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
+            if let Some(p) = cx.load_property(instance) {
+                return p;
+            }
+
+            warn!(
+                "Unable to compute property of non-local function {:?}",
+                instance
+            );
+            return Some(Default::default());
+        }
+
+        if cx.eval_stack.borrow().contains(&instance) {
+            // Recursion encountered.
+            return Some(Default::default());
+        }
+
+        cx.eval_stack.borrow_mut().push(instance);
+        let result = cx.compute_property(instance);
+
+        // Recursion encountered.
+        if cx.function_context_property.borrow().contains_key(&instance) {
+            if result != Some(Default::default()) {
+                let mut diag = cx.sess.struct_span_err(
+                    cx.def_span(instance.def_id()),
+                    "this function is recursive but carries no context specification",
+                );
+                diag.note(format!("Inferred as {:?}", result));
+                diag.emit();
+            }
+        }
+
+        cx.store_property(instance, result);
+
+        cx.eval_stack.borrow_mut().pop();
+        result
+    }
+}
+
+pub struct AtomicContext<'tcx> {
+    cx: AnalysisCtxt<'tcx>,
+}
+
+impl<'tcx> AtomicContext<'tcx> {
+    pub fn new(tcx: TyCtxt<'tcx>) -> Self {
+        Self {
+            cx: AnalysisCtxt::new(tcx),
+        }
+    }
 }
 
 impl_lint_pass!(AtomicContext<'_> => [ATOMIC_CONTEXT]);
+
+memoize! {
+    fn preemption_count_annotation<'tcx>(
+        cx: &AnalysisCtxt<'tcx>,
+        def_id: LocalDefId,
+    ) -> (Option<i32>, Option<PreemptionCountRange>) {
+        let hir = cx.hir();
+        let hir_id = hir.local_def_id_to_hir_id(def_id);
+        for attr in hir.attrs(hir_id) {
+            let Some(attr) = crate::attribute::parse_klint_attribute(cx.tcx, hir_id, attr) else { continue };
+            match attr {
+                crate::attribute::KlintAttribute::PreemptionCount {
+                    adjustment,
+                    assumption,
+                } => {
+                    return (adjustment, assumption);
+                }
+            }
+        }
+        (None, None)
+    }
+}
 
 impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
     fn check_fn(
@@ -928,22 +1009,13 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         _: &'tcx rustc_hir::FnDecl<'tcx>,
         body: &'tcx rustc_hir::Body<'tcx>,
         _: rustc_span::Span,
-        hir_id: rustc_hir::HirId,
+        _hir_id: rustc_hir::HirId,
     ) {
-        for attr in self.tcx.hir().attrs(hir_id) {
-            let Some(attr) = crate::attribute::parse_klint_attribute(cx, attr) else { continue };
-            match attr {
-                crate::attribute::KlintAttribute::PreemptionCount {
-                    adjustment,
-                    assumption,
-                } => {
-                    self.annotatation.borrow_mut().insert(
-                        self.tcx.hir().local_def_id(hir_id).to_def_id(),
-                        (adjustment, assumption),
-                    );
-                }
-            }
+        // This will ICE, disable for now.
+        if true {
+            return;
         }
+
         let def_id = cx.tcx.hir().body_owner_def_id(body.id());
 
         // Building MIR for `fn`s with unsatisfiable preds results in ICE.
@@ -951,9 +1023,9 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
             return;
         }
 
-        let identity = InternalSubsts::identity_for_item(self.tcx, def_id.into());
+        let identity = InternalSubsts::identity_for_item(self.cx.tcx, def_id.into());
         let instance = Instance::new(def_id.into(), identity);
-        self.property(instance);
+        self.cx.function_context_property(instance);
     }
 
     fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
@@ -965,7 +1037,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
 
         for mono_item in mono_items {
             if let MonoItem::Fn(instance) = mono_item {
-                self.property(instance);
+                self.cx.function_context_property(instance);
             }
         }
 
