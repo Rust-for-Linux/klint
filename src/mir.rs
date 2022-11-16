@@ -12,8 +12,6 @@ use rustc_middle::ty::{self, TyCtxt};
 use rustc_span::def_id::{DefId, LocalDefId};
 use rustc_span::sym;
 
-mod serde;
-
 use crate::ctxt::AnalysisCtxt;
 
 // HACK: we can't add new queries to `TyCtxt` without changing rustc code, so
@@ -127,7 +125,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     fn store_mir(&self, def_id: DefId, mir: &Body<'tcx>) {
         use rustc_serialize::Encodable;
 
-        let mut enc = self::serde::EncodeContext::new(self.tcx);
+        let mut enc = crate::serde::EncodeContext::new(self.tcx);
         mir.encode(&mut enc);
         let enc_result = enc.finish();
         self.sql_conn
@@ -160,7 +158,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             .optional()
             .unwrap()?;
         let _ = self.tcx.optimized_mir(def_id);
-        let mut dec = self::serde::DecodeContext::new(self.tcx, &mir_enc);
+        let mut dec = crate::serde::DecodeContext::new(self.tcx, &mir_enc);
         let mir = <&Body<'tcx>>::decode(&mut dec);
         Some(mir)
     }

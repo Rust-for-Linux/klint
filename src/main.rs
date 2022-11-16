@@ -43,6 +43,7 @@ mod attribute;
 mod infallible_allocation;
 mod mir;
 mod monomorphize_collector;
+mod serde;
 mod symbol;
 mod util;
 
