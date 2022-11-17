@@ -98,6 +98,7 @@ impl Callbacks for MyCallbacks {
 
 fn probe_sysroot() -> String {
     std::process::Command::new("rustc")
+        .arg("+beta-2022-11-01")
         .arg("--print")
         .arg("sysroot")
         .output()

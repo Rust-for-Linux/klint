@@ -469,10 +469,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 Some(ResolveResult::IndirectCall)
             }
             ty::InstanceDef::DropGlue(_, Some(v))
-                if !v.is_sized(
-                    self.tcx.at(terminator.source_info.span),
-                    ty::ParamEnv::reveal_all(),
-                ) =>
+                if !v.is_sized(self.tcx, ty::ParamEnv::reveal_all()) =>
             {
                 // Drop of DST will recreate a self-recursive
                 self.tcx.sess.span_warn(

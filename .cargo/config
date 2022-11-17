@@ -1,2 +1,2 @@
-[build]
-rustflags = ["-Zunstable-options"]
+[env]
+RUSTC_BOOTSTRAP = "1"
