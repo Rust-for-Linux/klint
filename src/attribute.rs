@@ -33,7 +33,7 @@ pub fn parse_klint_attribute(
         return None;
     }
     match item.path.segments[1].ident.name {
-        v if v == *crate::symbol::preemption_count => {
+        v if v == *crate::symbol::preempt_count => {
             let mut adjustment = None;
             let mut assumption = None;
 
@@ -42,9 +42,9 @@ pub fn parse_klint_attribute(
                     crate::INCORRECT_ATTRIBUTE,
                     hir_id,
                     attr.span,
-                    "incorrect usage of `#[kint::preemption_count]`",
+                    "incorrect usage of `#[kint::preempt_count]`",
                     |diag| {
-                        diag.help("correct usage looks like `#[kint::preemption_count(...)]`")
+                        diag.help("correct usage looks like `#[kint::preempt_count(...)]`")
                     },
                 );
                 return None;
@@ -57,7 +57,7 @@ pub fn parse_klint_attribute(
                         crate::INCORRECT_ATTRIBUTE,
                         hir_id,
                         span,
-                        "incorrect usage of `#[kint::preemption_count]`",
+                        "incorrect usage of `#[kint::preempt_count]`",
                         |diag| diag.help("`adjust` or `assume` expected"),
                     );
                     None
@@ -65,9 +65,9 @@ pub fn parse_klint_attribute(
 
                 let TokenTree::Token(token, _) = prop else { return invalid_prop(delim_span.close) };
                 let Some((name, _)) = token.ident() else { return invalid_prop(token.span) };
-                let assume = match name.name {
+                let expect = match name.name {
                     v if v == *crate::symbol::adjust => false,
-                    v if v == *crate::symbol::assume => true,
+                    v if v == *crate::symbol::expect => true,
                     _ => {
                         return invalid_prop(token.span);
                     }
@@ -79,7 +79,7 @@ pub fn parse_klint_attribute(
                         crate::INCORRECT_ATTRIBUTE,
                         hir_id,
                         span,
-                        "incorrect usage of `#[kint::preemption_count]`",
+                        "incorrect usage of `#[kint::preempt_count]`",
                         |diag| diag.help("`=` expected after property name"),
                     );
                     None
@@ -98,14 +98,14 @@ pub fn parse_klint_attribute(
                     return expect_eq(eq.span());
                 }
 
-                if !assume {
+                if !expect {
                     // Parse adjustment, which is a single integer literal.
                     let expect_int = |span| {
                         tcx.struct_span_lint_hir(
                             crate::INCORRECT_ATTRIBUTE,
                             hir_id,
                             span,
-                            "incorrect usage of `#[kint::preemption_count]`",
+                            "incorrect usage of `#[kint::preempt_count]`",
                             |diag| diag.help("an integer expected as the value of `adjust`"),
                         );
                         None
@@ -150,8 +150,8 @@ pub fn parse_klint_attribute(
                             crate::INCORRECT_ATTRIBUTE,
                             hir_id,
                             span,
-                            "incorrect usage of `#[kint::preemption_count]`",
-                            |diag| diag.help("a range expected as the value of `assume`"),
+                            "incorrect usage of `#[kint::preempt_count]`",
+                            |diag| diag.help("a range expected as the value of `expect`"),
                         );
                         None
                     };
@@ -252,7 +252,7 @@ pub fn parse_klint_attribute(
                             crate::INCORRECT_ATTRIBUTE,
                             hir_id,
                             start_span.until(end_span),
-                            "incorrect usage of `#[kint::preemption_count]`",
+                            "incorrect usage of `#[kint::preempt_count]`",
                             |diag| {
                                 diag.help("the preemption count assumption range must be non-empty")
                             },
@@ -273,7 +273,7 @@ pub fn parse_klint_attribute(
                         crate::INCORRECT_ATTRIBUTE,
                         hir_id,
                         span,
-                        "incorrect usage of `#[kint::preemption_count]`",
+                        "incorrect usage of `#[kint::preempt_count]`",
                         |diag| diag.help("`,` expected between property values"),
                     );
                     None
@@ -299,7 +299,7 @@ pub fn parse_klint_attribute(
                     crate::INCORRECT_ATTRIBUTE,
                     hir_id,
                     item.args.span().unwrap(),
-                    "incorrect usage of `#[kint::preemption_count]`",
+                    "incorrect usage of `#[kint::preempt_count]`",
                     |diag| diag.help("at least one property must be specified"),
                 );
             }

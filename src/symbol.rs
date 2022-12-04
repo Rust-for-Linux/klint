@@ -11,7 +11,7 @@ macro_rules! def {
 
 def! {
     klint,
-    preemption_count,
+    preempt_count,
     adjust,
-    assume,
+    expect,
 }
