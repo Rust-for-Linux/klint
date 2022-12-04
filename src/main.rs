@@ -89,8 +89,8 @@ impl Callbacks for MyCallbacks {
             lint_store.register_lints(&[&INCORRECT_ATTRIBUTE]);
             lint_store.register_lints(&[&infallible_allocation::INFALLIBLE_ALLOCATION]);
             lint_store.register_lints(&[&atomic_context::ATOMIC_CONTEXT]);
-            lint_store
-                .register_late_pass(|_| Box::new(infallible_allocation::InfallibleAllocation));
+            // lint_store
+            //     .register_late_pass(|_| Box::new(infallible_allocation::InfallibleAllocation));
             lint_store.register_late_pass(|tcx| Box::new(atomic_context::AtomicContext::new(tcx)));
         }));
     }
