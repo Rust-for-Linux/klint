@@ -25,3 +25,4 @@ rustup run nightly klint
 ## Implemented Lints
 
 * [Infallible allocation](doc/infallible_allocation.md)
+* [Atomic context](doc/atomic_context.md)
