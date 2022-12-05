@@ -4,8 +4,7 @@ CREATE TABLE function_context_property (
 );
 
 CREATE TABLE preemption_count_annotation (
-    stable_crate_id INTEGER,
-    local_def_id INTEGER,
+    local_def_id INTEGER PRIMARY KEY,
     adjustment INTEGER,
     assumption_lo INTEGER,
     assumption_hi INTEGER

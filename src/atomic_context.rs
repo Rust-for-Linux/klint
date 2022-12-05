@@ -1003,9 +1003,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     ) {
         self.local_conn
             .execute(
-                "INSERT OR REPLACE INTO preemption_count_annotation (stable_crate_id, local_def_id, adjustment, assumption_lo, assumption_hi) VALUES (?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO preemption_count_annotation (local_def_id, adjustment, assumption_lo, assumption_hi) VALUES (?, ?, ?, ?)",
                 rusqlite::params![
-                    self.tcx.stable_crate_id(def_id.krate).to_u64() as i64,
                     def_id.index.as_u32(),
                     annotation.0,
                     annotation.1.map(|r| r.lo),
@@ -1025,11 +1024,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         self
             .sql_connection(def_id.krate)?
             .query_row(
-                "SELECT adjustment, assumption_lo, assumption_hi FROM preemption_count_annotation WHERE stable_crate_id = ? AND local_def_id = ?",
-                rusqlite::params![
-                    self.tcx.stable_crate_id(def_id.krate).to_u64() as i64,
-                    def_id.index.as_u32(),
-                ],
+                "SELECT adjustment, assumption_lo, assumption_hi FROM preemption_count_annotation WHERE local_def_id = ?",
+                rusqlite::params![def_id.index.as_u32()],
                 |row| {
                     let adjustment = row.get(0)?;
                     let assumption_lo: Option<u32> = row.get(1)?;

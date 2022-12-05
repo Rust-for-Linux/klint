@@ -130,12 +130,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let enc_result = enc.finish();
         self.local_conn
             .execute(
-                "INSERT OR REPLACE INTO mir (stable_crate_id, local_def_id, mir) VALUES (?, ?, ?)",
-                rusqlite::params![
-                    self.tcx.stable_crate_id(def_id.krate).to_u64() as i64,
-                    def_id.index.as_u32(),
-                    enc_result,
-                ],
+                "INSERT OR REPLACE INTO mir (local_def_id, mir) VALUES (?, ?)",
+                rusqlite::params![def_id.index.as_u32(), enc_result],
             )
             .unwrap();
     }
@@ -148,11 +144,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let mir_enc: Vec<u8> = self
             .sql_connection(def_id.krate)?
             .query_row(
-                "SELECT mir FROM mir WHERE stable_crate_id = ? AND local_def_id = ?",
-                rusqlite::params![
-                    self.tcx.stable_crate_id(def_id.krate).to_u64() as i64,
-                    def_id.index.as_u32()
-                ],
+                "SELECT mir FROM mir WHERE local_def_id = ?",
+                rusqlite::params![def_id.index.as_u32()],
                 |row| row.get(0),
             )
             .optional()
