@@ -982,9 +982,11 @@ impl<'v> RootCollector<'_, 'v> {
                                     self.tcx.def_path_str(item.owner_id.to_def_id())
                                 );
 
-                                let ty =
-                                    Instance::new(item.owner_id.to_def_id(), InternalSubsts::empty())
-                                        .ty(self.tcx, ty::ParamEnv::reveal_all());
+                                let ty = Instance::new(
+                                    item.owner_id.to_def_id(),
+                                    InternalSubsts::empty(),
+                                )
+                                .ty(self.tcx, ty::ParamEnv::reveal_all());
                                 visit_drop_use(self.tcx, ty, true, DUMMY_SP, self.output);
                             }
                         }

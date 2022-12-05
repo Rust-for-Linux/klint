@@ -1,9 +1,9 @@
 use std::cell::RefCell;
-use std::path::PathBuf;
 
 use rusqlite::Connection;
 use rustc_data_structures::fx::FxHashMap;
-use rustc_hir::def_id::DefId;
+use rustc_data_structures::sync::Lrc;
+use rustc_hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
 use rustc_middle::mir;
 use rustc_middle::ty::{Instance, TyCtxt};
 
@@ -11,7 +11,8 @@ use crate::atomic_context::{FunctionContextProperty, PreemptionCountRange};
 
 pub struct AnalysisCtxt<'tcx> {
     pub tcx: TyCtxt<'tcx>,
-    pub sql_conn: Connection,
+    pub local_conn: Connection,
+    pub sql_conn: RefCell<FxHashMap<CrateNum, Option<Lrc<Connection>>>>,
 
     pub eval_stack: RefCell<Vec<Instance<'tcx>>>,
 
@@ -55,25 +56,84 @@ macro_rules! memoize {
 
 const SCHEMA_VERSION: u32 = 1;
 
-fn klint_home() -> PathBuf {
-    let mut klint_dir = home::home_dir().unwrap();
-    klint_dir.push(".klint");
-    std::fs::create_dir_all(&klint_dir).unwrap();
-    klint_dir
-}
-
 impl Drop for AnalysisCtxt<'_> {
     fn drop(&mut self) {
-        self.sql_conn.execute("commit", ()).unwrap();
+        self.local_conn.execute("commit", ()).unwrap();
     }
 }
 
 impl<'tcx> AnalysisCtxt<'tcx> {
-    pub fn new(tcx: TyCtxt<'tcx>) -> Self {
-        let mut klint_dir = klint_home();
-        klint_dir.push("db.sqlite3");
+    pub(crate) fn sql_connection(&self, cnum: CrateNum) -> Option<Lrc<Connection>> {
+        if let Some(v) = self.sql_conn.borrow().get(&cnum) {
+            return v.clone();
+        }
 
-        let mut conn = Connection::open(&klint_dir).unwrap();
+        let mut guard = self.sql_conn.borrow_mut();
+        if let Some(v) = guard.get(&cnum) {
+            return v.clone();
+        }
+
+        let mut result = None;
+        for path in self.tcx.crate_extern_paths(cnum) {
+            let Some(ext) = path.extension() else { continue };
+            if ext == "rlib" || ext == "rmeta" {
+                let klint_path = path.with_extension("klint");
+                if !klint_path.exists() {
+                    continue;
+                }
+                let conn = Connection::open_with_flags(
+                    &klint_path,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                )
+                .unwrap();
+
+                // Check the schema version matches the current version
+                let mut schema_ver = 0;
+                conn.pragma_query(None, "user_version", |r| {
+                    schema_ver = r.get::<_, u32>(0)?;
+                    Ok(())
+                })
+                .unwrap();
+
+                if schema_ver != SCHEMA_VERSION {
+                    info!(
+                        "schema version of {} mismatch, ignoring",
+                        klint_path.display()
+                    );
+                }
+
+                result = Some(Lrc::new(conn));
+                break;
+            }
+        }
+
+        if result.is_none() {
+            warn!(
+                "no klint metadata found for crate {}",
+                self.tcx.crate_name(cnum)
+            );
+        }
+
+        guard.insert(cnum, result.clone());
+        result
+    }
+
+    pub fn new(tcx: TyCtxt<'tcx>) -> Self {
+        let crate_name = tcx.crate_name(LOCAL_CRATE);
+        let output_filenames = tcx.output_filenames(());
+        let rmeta_path = rustc_session::output::filename_for_metadata(
+            tcx.sess,
+            crate_name.as_str(),
+            output_filenames,
+        );
+
+        // Double check that the rmeta file is .rlib or .rmeta
+        let ext = rmeta_path.extension().unwrap();
+        assert!(ext == "rlib" || ext == "rmeta");
+
+        let klint_out = rmeta_path.with_extension("klint");
+        let _ = std::fs::remove_file(&klint_out);
+        let conn = Connection::open(&klint_out).unwrap();
 
         // Check the schema version matches the current version
         let mut schema_ver = 0;
@@ -83,36 +143,16 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         })
         .unwrap();
 
-        // Delete and recreate the database if it uses an old schema.
-        if schema_ver != 0 && schema_ver != SCHEMA_VERSION {
-            info!("Schema version mismatch, purging database");
-            drop(conn);
-            std::fs::remove_file(&klint_dir).unwrap();
-            conn = Connection::open(&klint_dir).unwrap();
-        }
-
-        if schema_ver != SCHEMA_VERSION {
-            info!("Creating database schema");
-            conn.execute_batch(include_str!("mir/schema.sql")).unwrap();
-            conn.execute_batch(include_str!("schema.sql")).unwrap();
-            conn.pragma_update(None, "user_version", &SCHEMA_VERSION)
-                .unwrap();
-        }
-
-        loop {
-            match conn.execute("begin immediate", ()) {
-                Err(err) if err.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy) => {
-                    info!("Unable to acquire database lock, retrying");
-                    continue;
-                }
-                Ok(_) => break,
-                Err(err) => bug!("Failed to begin transaction: {}", err),
-            }
-        }
+        conn.execute_batch(include_str!("mir/schema.sql")).unwrap();
+        conn.execute_batch(include_str!("schema.sql")).unwrap();
+        conn.pragma_update(None, "user_version", &SCHEMA_VERSION)
+            .unwrap();
+        conn.execute("begin immediate", ()).unwrap();
 
         Self {
             tcx,
-            sql_conn: conn,
+            local_conn: conn,
+            sql_conn: Default::default(),
             eval_stack: Default::default(),
             analysis_mir: Default::default(),
             preemption_count_annotation: Default::default(),

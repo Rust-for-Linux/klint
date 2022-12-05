@@ -128,7 +128,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let mut enc = crate::serde::EncodeContext::new(self.tcx);
         mir.encode(&mut enc);
         let enc_result = enc.finish();
-        self.sql_conn
+        self.local_conn
             .execute(
                 "INSERT OR REPLACE INTO mir (stable_crate_id, local_def_id, mir) VALUES (?, ?, ?)",
                 rusqlite::params![
@@ -146,7 +146,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         use rustc_serialize::Decodable;
 
         let mir_enc: Vec<u8> = self
-            .sql_conn
+            .sql_connection(def_id.krate)?
             .query_row(
                 "SELECT mir FROM mir WHERE stable_crate_id = ? AND local_def_id = ?",
                 rusqlite::params![

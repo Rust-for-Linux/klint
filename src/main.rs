@@ -82,7 +82,10 @@ impl Callbacks for MyCallbacks {
         });
         config.register_lints = Some(Box::new(move |sess, lint_store| {
             // Skip checks for proc-macro crates.
-            if sess.crate_types().contains(&rustc_session::config::CrateType::ProcMacro) {
+            if sess
+                .crate_types()
+                .contains(&rustc_session::config::CrateType::ProcMacro)
+            {
                 return;
             }
 

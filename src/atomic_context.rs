@@ -869,7 +869,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         property.encode(&mut enc);
         let property_enc = enc.finish();
 
-        self.sql_conn
+        instance.def_id().expect_local();
+
+        self.local_conn
             .execute(
                 "INSERT OR REPLACE INTO function_context_property (instance, property) VALUES (?, ?)",
                 rusqlite::params![
@@ -889,7 +891,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let instance_enc = enc.finish();
 
         let property_enc: Vec<u8> = self
-            .sql_conn
+            .sql_connection(instance.def_id().krate)?
             .query_row(
                 "SELECT property FROM function_context_property WHERE instance = ?",
                 rusqlite::params![instance_enc,],
@@ -969,7 +971,9 @@ memoize! {
             }
         }
 
-        cx.store_property(instance, result);
+        if instance.def_id().is_local() {
+            cx.store_property(instance, result);
+        }
 
         cx.eval_stack.borrow_mut().pop();
         result
@@ -997,7 +1001,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         def_id: DefId,
         annotation: (Option<i32>, Option<PreemptionCountRange>),
     ) {
-        self.sql_conn
+        self.local_conn
             .execute(
                 "INSERT OR REPLACE INTO preemption_count_annotation (stable_crate_id, local_def_id, adjustment, assumption_lo, assumption_hi) VALUES (?, ?, ?, ?, ?)",
                 rusqlite::params![
@@ -1019,7 +1023,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         use rusqlite::OptionalExtension;
 
         self
-            .sql_conn
+            .sql_connection(def_id.krate)?
             .query_row(
                 "SELECT adjustment, assumption_lo, assumption_hi FROM preemption_count_annotation WHERE stable_crate_id = ? AND local_def_id = ?",
                 rusqlite::params![
