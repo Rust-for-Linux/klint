@@ -7,5 +7,6 @@ CREATE TABLE preemption_count_annotation (
     local_def_id INTEGER PRIMARY KEY,
     adjustment INTEGER,
     expectation_lo INTEGER,
-    expectation_hi INTEGER
+    expectation_hi INTEGER,
+    unchecked BOOLEAN
 );

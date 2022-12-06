@@ -7,7 +7,7 @@ use rustc_hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
 use rustc_middle::mir;
 use rustc_middle::ty::{Instance, TyCtxt};
 
-use crate::atomic_context::{FunctionContextProperty, PreemptionCountRange};
+use crate::atomic_context::FunctionContextProperty;
 
 pub struct AnalysisCtxt<'tcx> {
     pub tcx: TyCtxt<'tcx>,
@@ -18,7 +18,7 @@ pub struct AnalysisCtxt<'tcx> {
 
     pub analysis_mir: RefCell<FxHashMap<DefId, &'tcx mir::Body<'tcx>>>,
     pub preemption_count_annotation:
-        RefCell<FxHashMap<DefId, (Option<i32>, Option<PreemptionCountRange>)>>,
+        RefCell<FxHashMap<DefId, crate::attribute::PreemptionCount>>,
     pub function_context_property:
         RefCell<FxHashMap<Instance<'tcx>, Option<FunctionContextProperty>>>,
 }

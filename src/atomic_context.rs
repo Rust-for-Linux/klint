@@ -13,6 +13,7 @@ use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
 use rustc_serialize::{Decodable, Encodable};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
 
+use crate::attribute::PreemptionCount as PreemptionCountAttr;
 use crate::ctxt::AnalysisCtxt;
 
 // A description of how atomic context analysis works.
@@ -722,7 +723,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         // Use annotation if available.
         let def_id = instance.def_id();
-        let (mut adjustment, mut expectation) = self.preemption_count_annotation(def_id);
+        let annotation = self.preemption_count_annotation(def_id);
+        let mut adjustment = annotation.adjustment;
+        let mut expectation = annotation.expectation;
         if adjustment.is_some() || expectation.is_some() {
             info!(
                 "adjustment {:?} and expectation {:?} from annotation",
@@ -997,51 +1000,47 @@ impl_lint_pass!(AtomicContext<'_> => [ATOMIC_CONTEXT]);
 
 impl<'tcx> AnalysisCtxt<'tcx> {
     #[instrument(skip(self))]
-    fn store_preemption_count_annotation(
-        &self,
-        def_id: DefId,
-        annotation: (Option<i32>, Option<PreemptionCountRange>),
-    ) {
+    fn store_preemption_count_annotation(&self, def_id: DefId, annotation: PreemptionCountAttr) {
         self.local_conn
             .execute(
-                "INSERT OR REPLACE INTO preemption_count_annotation (local_def_id, adjustment, expectation_lo, expectation_hi) VALUES (?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO preemption_count_annotation (local_def_id, adjustment, expectation_lo, expectation_hi, unchecked) VALUES (?, ?, ?, ?, ?)",
                 rusqlite::params![
                     def_id.index.as_u32(),
-                    annotation.0,
-                    annotation.1.map(|r| r.lo),
-                    annotation.1.and_then(|r| r.hi),
+                    annotation.adjustment,
+                    annotation.expectation.map(|r| r.lo),
+                    annotation.expectation.and_then(|r| r.hi),
+                    annotation.unchecked,
                 ],
             )
             .unwrap();
     }
 
     #[instrument(skip(self))]
-    fn load_preemption_count_annotation(
-        &self,
-        def_id: DefId,
-    ) -> Option<(Option<i32>, Option<PreemptionCountRange>)> {
+    fn load_preemption_count_annotation(&self, def_id: DefId) -> Option<PreemptionCountAttr> {
         use rusqlite::OptionalExtension;
 
         self
             .sql_connection(def_id.krate)?
             .query_row(
-                "SELECT adjustment, expectation_lo, expectation_hi FROM preemption_count_annotation WHERE local_def_id = ?",
+                "SELECT adjustment, expectation_lo, expectation_hi, unchecked FROM preemption_count_annotation WHERE local_def_id = ?",
                 rusqlite::params![def_id.index.as_u32()],
                 |row| {
                     let adjustment = row.get(0)?;
                     let expectation_lo: Option<u32> = row.get(1)?;
                     let expectation_hi = row.get(2)?;
-                    Ok((adjustment, expectation_lo.map(|lo| PreemptionCountRange { lo, hi: expectation_hi })))
+                    let unchecked = row.get(3)?;
+                    Ok(PreemptionCountAttr {
+                        adjustment,
+                        expectation: expectation_lo.map(|lo| PreemptionCountRange { lo, hi: expectation_hi }),
+                        unchecked,
+                    })
                 },
             )
             .optional()
             .unwrap()
     }
 
-    fn preemption_count_annotation_fallback(
-        &self,
-        def_id: DefId,
-    ) -> (Option<i32>, Option<PreemptionCountRange>) {
+    fn preemption_count_annotation_fallback(&self, def_id: DefId) -> PreemptionCountAttr {
         match self.crate_name(def_id.krate).as_str() {
             // Happens in a test environment where build-std is not enabled.
             "core" | "alloc" | "std" => (),
@@ -1052,7 +1051,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 );
             }
         }
-        (None, None)
+        Default::default()
     }
 }
 
@@ -1060,7 +1059,7 @@ memoize! {
     fn preemption_count_annotation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         def_id: DefId,
-    ) -> (Option<i32>, Option<PreemptionCountRange>) {
+    ) -> PreemptionCountAttr {
         let Some(local_def_id) = def_id.as_local() else {
             if let Some(v) = cx.load_preemption_count_annotation(def_id) {
                 return v;
@@ -1070,18 +1069,16 @@ memoize! {
 
         let hir = cx.hir();
         let hir_id = hir.local_def_id_to_hir_id(local_def_id);
-        let mut value = (None, None);
         for attr in hir.attrs(hir_id) {
             let Some(attr) = crate::attribute::parse_klint_attribute(cx.tcx, hir_id, attr) else { continue };
             match attr {
                 crate::attribute::KlintAttribute::PreemptionCount(pc) => {
-                    value = (pc.adjustment, pc.expectation);
-                    break;
+                    return pc;
                 }
             }
         }
 
-        value
+        Default::default()
     }
 }
 

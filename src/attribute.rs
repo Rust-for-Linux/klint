@@ -8,11 +8,21 @@ use rustc_span::Span;
 
 use crate::atomic_context::PreemptionCountRange;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct PreemptionCount {
     pub adjustment: Option<i32>,
     pub expectation: Option<PreemptionCountRange>,
     pub unchecked: bool,
+}
+
+impl Default for PreemptionCount {
+    fn default() -> Self {
+        PreemptionCount {
+            adjustment: None,
+            expectation: None,
+            unchecked: false,
+        }
+    }
 }
 
 #[derive(Debug)]
