@@ -4,6 +4,7 @@
 #![feature(box_patterns)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
+#![feature(never_type)]
 #![warn(rustc::internal)]
 #![allow(rustc::potential_query_instability)]
 

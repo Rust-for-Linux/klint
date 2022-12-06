@@ -1,15 +1,403 @@
-use rustc_ast::{ast, token, tokenstream::TokenTree};
+use rustc_ast::tokenstream::{self, TokenTree};
+use rustc_ast::{ast, token};
+use rustc_errors::{DiagnosticBuilder, ErrorGuaranteed};
 use rustc_hir::HirId;
 use rustc_middle::ty::TyCtxt;
+use rustc_span::symbol::Ident;
+use rustc_span::Span;
 
 use crate::atomic_context::PreemptionCountRange;
 
 #[derive(Debug)]
+pub struct PreemptionCount {
+    pub adjustment: Option<i32>,
+    pub expectation: Option<PreemptionCountRange>,
+    pub unchecked: bool,
+}
+
+#[derive(Debug)]
 pub enum KlintAttribute {
-    PreemptionCount {
-        adjustment: Option<i32>,
-        expectation: Option<PreemptionCountRange>,
-    },
+    PreemptionCount(PreemptionCount),
+}
+
+struct Cursor<'a> {
+    eof: TokenTree,
+    cursor: tokenstream::CursorRef<'a>,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(cursor: tokenstream::CursorRef<'a>, end_span: Span) -> Self {
+        let eof = TokenTree::Token(
+            token::Token {
+                kind: token::TokenKind::Eof,
+                span: end_span,
+            },
+            tokenstream::Spacing::Alone,
+        );
+        Cursor { eof, cursor }
+    }
+
+    fn is_eof(&self) -> bool {
+        self.cursor.look_ahead(0).is_none()
+    }
+
+    fn look_ahead(&self, n: usize) -> &TokenTree {
+        self.cursor.look_ahead(n).unwrap_or(&self.eof)
+    }
+
+    fn next(&mut self) -> &TokenTree {
+        self.cursor.next().unwrap_or(&self.eof)
+    }
+}
+
+struct AttrParser<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    hir_id: HirId,
+}
+
+impl<'tcx> AttrParser<'tcx> {
+    fn error(
+        &self,
+        span: Span,
+        decorate: impl for<'a, 'b> FnOnce(
+            &'b mut DiagnosticBuilder<'a, ()>,
+        ) -> &'b mut DiagnosticBuilder<'a, ()>,
+    ) -> Result<!, ErrorGuaranteed> {
+        self.tcx.struct_span_lint_hir(
+            crate::INCORRECT_ATTRIBUTE,
+            self.hir_id,
+            span,
+            "incorrect usage of `#[kint::preempt_count]`",
+            decorate,
+        );
+        Err(ErrorGuaranteed::unchecked_claim_error_was_emitted())
+    }
+
+    fn parse_comma_delimited(
+        &self,
+        mut cursor: Cursor<'_>,
+        mut f: impl for<'a> FnMut(Cursor<'a>) -> Result<Cursor<'a>, ErrorGuaranteed>,
+    ) -> Result<(), ErrorGuaranteed> {
+        loop {
+            if cursor.is_eof() {
+                return Ok(());
+            }
+
+            cursor = f(cursor)?;
+
+            if cursor.is_eof() {
+                return Ok(());
+            }
+
+            // Check and skip `,`.
+            let comma = cursor.next();
+            if !matches!(
+                comma,
+                TokenTree::Token(
+                    token::Token {
+                        kind: token::TokenKind::Comma,
+                        ..
+                    },
+                    _
+                )
+            ) {
+                self.error(comma.span(), |diag| {
+                    diag.help("`,` expected between property values")
+                })?;
+            }
+        }
+    }
+
+    fn parse_eq_delimited<'a>(
+        &self,
+        mut cursor: Cursor<'a>,
+        need_eq: impl FnOnce(Ident) -> Result<bool, ErrorGuaranteed>,
+        f: impl FnOnce(Ident, Cursor<'a>) -> Result<Cursor<'a>, ErrorGuaranteed>,
+    ) -> Result<Cursor<'a>, ErrorGuaranteed> {
+        let prop = cursor.next();
+        let invalid_prop = |span| {
+            self.error(span, |diag| diag.help("identifier expected"))?;
+        };
+
+        let TokenTree::Token(token, _) = prop else { return invalid_prop(prop.span()) };
+        let Some((name, _)) = token.ident() else { return invalid_prop(token.span) };
+
+        let need_eq = need_eq(name)?;
+
+        // Check and skip `=`.
+        let eq = cursor.look_ahead(0);
+        let is_eq = matches!(
+            eq,
+            TokenTree::Token(
+                token::Token {
+                    kind: token::TokenKind::Eq,
+                    ..
+                },
+                _
+            )
+        );
+        if need_eq && !is_eq {
+            self.error(eq.span(), |diag| {
+                diag.help("`=` expected after property name")
+            })?;
+        }
+        if !need_eq && is_eq {
+            self.error(eq.span(), |diag| {
+                diag.help("unexpected `=` after property name")
+            })?;
+        }
+
+        if is_eq {
+            cursor.next();
+        }
+
+        cursor = f(name, cursor)?;
+
+        Ok(cursor)
+    }
+
+    fn parse_i32<'a>(&self, mut cursor: Cursor<'a>) -> Result<(i32, Cursor<'a>), ErrorGuaranteed> {
+        let expect_int = |span| self.error(span, |diag| diag.help("an integer expected"));
+
+        let negative = if matches!(
+            cursor.look_ahead(0),
+            TokenTree::Token(
+                token::Token {
+                    kind: token::TokenKind::BinOp(token::BinOpToken::Minus),
+                    ..
+                },
+                _
+            )
+        ) {
+            cursor.next();
+            true
+        } else {
+            false
+        };
+
+        let token = cursor.next();
+        let TokenTree::Token(
+            token::Token {
+                kind: token::TokenKind::Literal(lit),
+                ..
+            },
+            _,
+        ) = token else { expect_int(token.span())? };
+        if lit.kind != token::LitKind::Integer || lit.suffix.is_some() {
+            expect_int(token.span())?;
+        }
+        let Some(v) = lit.symbol.as_str().parse::<i32>().ok() else {
+            expect_int(token.span())?;
+        };
+        let v = if negative { -v } else { v };
+
+        Ok((v, cursor))
+    }
+
+    fn parse_expectation_range<'a>(
+        &self,
+        mut cursor: Cursor<'a>,
+    ) -> Result<((u32, Option<u32>), Cursor<'a>), ErrorGuaranteed> {
+        let expect_range = |span| self.error(span, |diag| diag.help("a range expected"));
+
+        let start_span = cursor.look_ahead(0).span();
+        let mut start = 0;
+        if !matches!(
+            cursor.look_ahead(0),
+            TokenTree::Token(
+                token::Token {
+                    kind: token::TokenKind::DotDot | token::TokenKind::DotDotEq,
+                    ..
+                },
+                _
+            )
+        ) {
+            let token = cursor.next();
+            let TokenTree::Token(
+                                token::Token {
+                                    kind: token::TokenKind::Literal(lit),
+                                    ..
+                                },
+                                _,
+                            ) = token else { expect_range(token.span())? };
+            if lit.kind != token::LitKind::Integer {
+                expect_range(token.span())?;
+            }
+            let Some(v) = lit.symbol.as_str().parse::<u32>().ok() else {
+                                expect_range(token.span())?;
+                            };
+            start = v;
+        }
+
+        let inclusive = match cursor.look_ahead(0) {
+            TokenTree::Token(
+                token::Token {
+                    kind: token::TokenKind::DotDot,
+                    ..
+                },
+                _,
+            ) => Some(false),
+            TokenTree::Token(
+                token::Token {
+                    kind: token::TokenKind::DotDotEq,
+                    ..
+                },
+                _,
+            ) => Some(true),
+            _ => None,
+        };
+
+        let mut end = Some(start + 1);
+        if let Some(inclusive) = inclusive {
+            cursor.next();
+
+            let skip_hi = match cursor.look_ahead(0) {
+                TokenTree::Token(
+                    token::Token {
+                        kind: token::TokenKind::Comma | token::TokenKind::Eof,
+                        ..
+                    },
+                    _,
+                ) => true,
+                _ => false,
+            };
+
+            if skip_hi {
+                end = None;
+            } else {
+                let token = cursor.next();
+                let TokenTree::Token(
+                                    token::Token {
+                                        kind: token::TokenKind::Literal(lit),
+                                        ..
+                                    },
+                                    _,
+                                ) = token else { expect_range(token.span())? };
+                if lit.kind != token::LitKind::Integer {
+                    expect_range(token.span())?;
+                }
+                let Some(range) = lit.symbol.as_str().parse::<u32>().ok() else {
+                                    expect_range(token.span())?;
+                                };
+
+                end = Some(if inclusive { range + 1 } else { range });
+            }
+        }
+
+        if end.is_some() && end.unwrap() <= start {
+            let end_span = cursor.next().span();
+
+            self.error(start_span.until(end_span), |diag| {
+                diag.help("the preemption count expectation range must be non-empty")
+            })?;
+        }
+
+        Ok(((start, end), cursor))
+    }
+
+    fn parse_preempt_count(
+        &self,
+        attr: &ast::Attribute,
+        item: &ast::AttrItem,
+    ) -> Result<PreemptionCount, ErrorGuaranteed> {
+        let mut adjustment = None;
+        let mut expectation = None;
+        let mut unchecked = false;
+
+        let ast::MacArgs::Delimited(delim_span, _, tts) = &item.args else {
+            self.error(
+                attr.span,
+                |diag| {
+                    diag.help("correct usage looks like `#[kint::preempt_count(...)]`")
+                },
+            )?;
+        };
+
+        self.parse_comma_delimited(Cursor::new(tts.trees(), delim_span.close), |cursor| {
+            self.parse_eq_delimited(
+                cursor,
+                |name| {
+                    Ok(match name.name {
+                        v if v == *crate::symbol::adjust => true,
+                        v if v == *crate::symbol::expect => true,
+                        v if v == *crate::symbol::unchecked => false,
+                        _ => {
+                            self.error(name.span, |diag| {
+                                diag.help(
+                                    "unknown property, expected `adjust`, `expect` or `unchecked`",
+                                )
+                            })?;
+                        }
+                    })
+                },
+                |name, mut cursor| {
+                    match name.name {
+                        v if v == *crate::symbol::adjust => {
+                            let v;
+                            (v, cursor) = self.parse_i32(cursor)?;
+                            adjustment = Some(v);
+                        }
+                        v if v == *crate::symbol::expect => {
+                            let (lo, hi);
+                            ((lo, hi), cursor) = self.parse_expectation_range(cursor)?;
+                            expectation = Some(PreemptionCountRange { lo, hi });
+                        }
+                        v if v == *crate::symbol::unchecked => {
+                            unchecked = true;
+                        }
+                        _ => unreachable!(),
+                    }
+
+                    Ok(cursor)
+                },
+            )
+        })?;
+
+        if adjustment.is_none() && expectation.is_none() {
+            self.error(item.args.span().unwrap(), |diag| {
+                diag.help("at least one property must be specified")
+            })?;
+        }
+
+        Ok(PreemptionCount {
+            adjustment,
+            expectation,
+            unchecked,
+        })
+    }
+
+    fn parse(&self, attr: &ast::Attribute) -> Option<KlintAttribute> {
+        let ast::AttrKind::Normal(normal_attr) = &attr.kind else { return None };
+        let item = &normal_attr.item;
+        if item.path.segments[0].ident.name != *crate::symbol::klint {
+            return None;
+        };
+        if item.path.segments.len() != 2 {
+            self.tcx.struct_span_lint_hir(
+                crate::INCORRECT_ATTRIBUTE,
+                self.hir_id,
+                attr.span,
+                "invalid klint attribute",
+                |diag| diag,
+            );
+            return None;
+        }
+        match item.path.segments[1].ident.name {
+            v if v == *crate::symbol::preempt_count => Some(KlintAttribute::PreemptionCount(
+                self.parse_preempt_count(attr, item).ok()?,
+            )),
+            _ => {
+                self.tcx.struct_span_lint_hir(
+                    crate::INCORRECT_ATTRIBUTE,
+                    self.hir_id,
+                    item.path.segments[1].span(),
+                    "unrecognized klint attribute",
+                    |diag| diag,
+                );
+                None
+            }
+        }
+    }
 }
 
 pub fn parse_klint_attribute(
@@ -17,307 +405,5 @@ pub fn parse_klint_attribute(
     hir_id: HirId,
     attr: &ast::Attribute,
 ) -> Option<KlintAttribute> {
-    let ast::AttrKind::Normal(normal_attr) = &attr.kind else { return None };
-    let item = &normal_attr.item;
-    if item.path.segments[0].ident.name != *crate::symbol::klint {
-        return None;
-    };
-    if item.path.segments.len() != 2 {
-        tcx.struct_span_lint_hir(
-            crate::INCORRECT_ATTRIBUTE,
-            hir_id,
-            attr.span,
-            "invalid klint attribute",
-            |diag| diag,
-        );
-        return None;
-    }
-    match item.path.segments[1].ident.name {
-        v if v == *crate::symbol::preempt_count => {
-            let mut adjustment = None;
-            let mut expectation = None;
-
-            let ast::MacArgs::Delimited(delim_span, _, tts) = &item.args else {
-                tcx.struct_span_lint_hir(
-                    crate::INCORRECT_ATTRIBUTE,
-                    hir_id,
-                    attr.span,
-                    "incorrect usage of `#[kint::preempt_count]`",
-                    |diag| {
-                        diag.help("correct usage looks like `#[kint::preempt_count(...)]`")
-                    },
-                );
-                return None;
-            };
-
-            let mut cursor = tts.trees();
-            while let Some(prop) = cursor.next() {
-                let invalid_prop = |span| {
-                    tcx.struct_span_lint_hir(
-                        crate::INCORRECT_ATTRIBUTE,
-                        hir_id,
-                        span,
-                        "incorrect usage of `#[kint::preempt_count]`",
-                        |diag| diag.help("`adjust` or `expect` expected"),
-                    );
-                    None
-                };
-
-                let TokenTree::Token(token, _) = prop else { return invalid_prop(delim_span.close) };
-                let Some((name, _)) = token.ident() else { return invalid_prop(token.span) };
-                let expect = match name.name {
-                    v if v == *crate::symbol::adjust => false,
-                    v if v == *crate::symbol::expect => true,
-                    _ => {
-                        return invalid_prop(token.span);
-                    }
-                };
-
-                // Check and skip `=`.
-                let expect_eq = |span| {
-                    tcx.struct_span_lint_hir(
-                        crate::INCORRECT_ATTRIBUTE,
-                        hir_id,
-                        span,
-                        "incorrect usage of `#[kint::preempt_count]`",
-                        |diag| diag.help("`=` expected after property name"),
-                    );
-                    None
-                };
-                let Some(eq) = cursor.next() else { return expect_eq(delim_span.close) };
-                if !matches!(
-                    eq,
-                    TokenTree::Token(
-                        token::Token {
-                            kind: token::TokenKind::Eq,
-                            ..
-                        },
-                        _
-                    )
-                ) {
-                    return expect_eq(eq.span());
-                }
-
-                if !expect {
-                    // Parse adjustment, which is a single integer literal.
-                    let expect_int = |span| {
-                        tcx.struct_span_lint_hir(
-                            crate::INCORRECT_ATTRIBUTE,
-                            hir_id,
-                            span,
-                            "incorrect usage of `#[kint::preempt_count]`",
-                            |diag| diag.help("an integer expected as the value of `adjust`"),
-                        );
-                        None
-                    };
-
-                    let negative = if matches!(
-                        cursor.look_ahead(0),
-                        Some(TokenTree::Token(
-                            token::Token {
-                                kind: token::TokenKind::BinOp(token::BinOpToken::Minus),
-                                ..
-                            },
-                            _
-                        ))
-                    ) {
-                        cursor.next();
-                        true
-                    } else {
-                        false
-                    };
-
-                    let Some(token) = cursor.next() else { return expect_int(delim_span.close) };
-                    let TokenTree::Token(
-                        token::Token {
-                            kind: token::TokenKind::Literal(lit),
-                            ..
-                        },
-                        _,
-                    ) = token else { return expect_int(token.span()) };
-                    if lit.kind != token::LitKind::Integer || lit.suffix.is_some() {
-                        return expect_int(token.span());
-                    }
-                    let Some(v) = lit.symbol.as_str().parse::<i32>().ok() else {
-                        return expect_int(token.span());
-                    };
-                    let v = if negative { -v } else { v };
-                    adjustment = Some(v);
-                } else {
-                    // Parse expectation, which is a range.
-                    let expect_range = |span| {
-                        tcx.struct_span_lint_hir(
-                            crate::INCORRECT_ATTRIBUTE,
-                            hir_id,
-                            span,
-                            "incorrect usage of `#[kint::preempt_count]`",
-                            |diag| diag.help("a range expected as the value of `expect`"),
-                        );
-                        None
-                    };
-
-                    let start_span = cursor
-                        .look_ahead(0)
-                        .map(|t| t.span())
-                        .unwrap_or(delim_span.close);
-                    let mut start = 0;
-                    if !matches!(
-                        cursor.look_ahead(0),
-                        Some(TokenTree::Token(
-                            token::Token {
-                                kind: token::TokenKind::DotDot | token::TokenKind::DotDotEq,
-                                ..
-                            },
-                            _
-                        ))
-                    ) {
-                        let Some(token) = cursor.next() else { return expect_range(delim_span.close) };
-                        let TokenTree::Token(
-                            token::Token {
-                                kind: token::TokenKind::Literal(lit),
-                                ..
-                            },
-                            _,
-                        ) = token else { return expect_range(token.span()) };
-                        if lit.kind != token::LitKind::Integer {
-                            return expect_range(token.span());
-                        }
-                        let Some(v) = lit.symbol.as_str().parse::<u32>().ok() else {
-                            return expect_range(token.span());
-                        };
-                        start = v;
-                    }
-
-                    let inclusive = match cursor.look_ahead(0) {
-                        Some(TokenTree::Token(
-                            token::Token {
-                                kind: token::TokenKind::DotDot,
-                                ..
-                            },
-                            _,
-                        )) => Some(false),
-                        Some(TokenTree::Token(
-                            token::Token {
-                                kind: token::TokenKind::DotDotEq,
-                                ..
-                            },
-                            _,
-                        )) => Some(true),
-                        _ => None,
-                    };
-
-                    let mut end = Some(start + 1);
-                    if let Some(inclusive) = inclusive {
-                        cursor.next();
-
-                        let skip_hi = match cursor.look_ahead(0) {
-                            Some(TokenTree::Token(
-                                token::Token {
-                                    kind: token::TokenKind::Comma,
-                                    ..
-                                },
-                                _,
-                            )) => true,
-                            None => true,
-                            _ => false,
-                        };
-
-                        if skip_hi {
-                            end = None;
-                        } else {
-                            dbg!(skip_hi);
-                            let Some(token) = cursor.next() else { return expect_range(delim_span.close) };
-                            let TokenTree::Token(
-                                token::Token {
-                                    kind: token::TokenKind::Literal(lit),
-                                    ..
-                                },
-                                _,
-                            ) = token else { return expect_range(token.span()) };
-                            if lit.kind != token::LitKind::Integer {
-                                return expect_range(token.span());
-                            }
-                            let Some(range) = lit.symbol.as_str().parse::<u32>().ok() else {
-                                return expect_range(token.span());
-                            };
-
-                            end = Some(if inclusive { range + 1 } else { range });
-                        }
-                    }
-
-                    if end.is_some() && end.unwrap() <= start {
-                        let end_span = cursor.next().map(|t| t.span()).unwrap_or(delim_span.close);
-
-                        tcx.struct_span_lint_hir(
-                            crate::INCORRECT_ATTRIBUTE,
-                            hir_id,
-                            start_span.until(end_span),
-                            "incorrect usage of `#[kint::preempt_count]`",
-                            |diag| {
-                                diag.help("the preemption count expectation range must be non-empty")
-                            },
-                        );
-                    }
-
-                    expectation = Some(PreemptionCountRange { lo: start, hi: end });
-                }
-
-                // End of attribute arguments.
-                if cursor.look_ahead(0).is_none() {
-                    break;
-                }
-
-                // Check and skip `,`.
-                let expect_comma = |span| {
-                    tcx.struct_span_lint_hir(
-                        crate::INCORRECT_ATTRIBUTE,
-                        hir_id,
-                        span,
-                        "incorrect usage of `#[kint::preempt_count]`",
-                        |diag| diag.help("`,` expected between property values"),
-                    );
-                    None
-                };
-
-                let Some(comma) = cursor.next() else { return expect_comma(delim_span.close) };
-                if !matches!(
-                    comma,
-                    TokenTree::Token(
-                        token::Token {
-                            kind: token::TokenKind::Comma,
-                            ..
-                        },
-                        _
-                    )
-                ) {
-                    return expect_comma(comma.span());
-                }
-            }
-
-            if adjustment.is_none() && expectation.is_none() {
-                tcx.struct_span_lint_hir(
-                    crate::INCORRECT_ATTRIBUTE,
-                    hir_id,
-                    item.args.span().unwrap(),
-                    "incorrect usage of `#[kint::preempt_count]`",
-                    |diag| diag.help("at least one property must be specified"),
-                );
-            }
-
-            Some(KlintAttribute::PreemptionCount {
-                adjustment,
-                expectation,
-            })
-        }
-        _ => {
-            tcx.struct_span_lint_hir(
-                crate::INCORRECT_ATTRIBUTE,
-                hir_id,
-                item.path.segments[1].span(),
-                "unrecognized klint attribute",
-                |diag| diag,
-            );
-            None
-        }
-    }
+    AttrParser { tcx, hir_id }.parse(attr)
 }

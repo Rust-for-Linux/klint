@@ -1074,11 +1074,8 @@ memoize! {
         for attr in hir.attrs(hir_id) {
             let Some(attr) = crate::attribute::parse_klint_attribute(cx.tcx, hir_id, attr) else { continue };
             match attr {
-                crate::attribute::KlintAttribute::PreemptionCount {
-                    adjustment,
-                    expectation,
-                } => {
-                    value = (adjustment, expectation);
+                crate::attribute::KlintAttribute::PreemptionCount(pc) => {
+                    value = (pc.adjustment, pc.expectation);
                     break;
                 }
             }

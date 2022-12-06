@@ -14,4 +14,5 @@ def! {
     preempt_count,
     adjust,
     expect,
+    unchecked,
 }
