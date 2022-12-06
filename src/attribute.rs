@@ -365,7 +365,7 @@ impl<'tcx> AttrParser<'tcx> {
 
         if adjustment.is_none() && expectation.is_none() {
             self.error(item.args.span().unwrap(), |diag| {
-                diag.help("at least one property must be specified")
+                diag.help("at least one of `adjust` or `expect` property must be specified")
             })?;
         }
 

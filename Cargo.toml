@@ -8,6 +8,9 @@ license = "MIT OR Apache-2.0"
 rusqlite = "0.28"
 home = "0.5"
 
+[dev-dependencies]
+compiletest_rs = { version = "0.9", features = [ "tmp" ] }
+
 [package.metadata.rust-analyzer]
 # This crate uses #![feature(rustc_private)]
 rustc_private = true

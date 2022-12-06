@@ -129,11 +129,15 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         // Double check that the rmeta file is .rlib or .rmeta
         let ext = rmeta_path.extension().unwrap();
-        assert!(ext == "rlib" || ext == "rmeta");
-
-        let klint_out = rmeta_path.with_extension("klint");
-        let _ = std::fs::remove_file(&klint_out);
-        let conn = Connection::open(&klint_out).unwrap();
+        let conn;
+        if ext == "rlib" || ext == "rmeta" {
+            let klint_out = rmeta_path.with_extension("klint");
+            let _ = std::fs::remove_file(&klint_out);
+            conn = Connection::open(&klint_out).unwrap();
+        } else {
+            info!("klint called on a binary crate");
+            conn = Connection::open_in_memory().unwrap();
+        }
 
         // Check the schema version matches the current version
         let mut schema_ver = 0;
