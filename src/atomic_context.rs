@@ -770,7 +770,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         }
 
         // Gather adjustments.
-        if adjustment.is_none() {
+        if !annotation.unchecked || adjustment.is_none() {
             let mut adjustment_infer = AdjustmentBounds::default();
             for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
                 match data.terminator().kind {
@@ -791,11 +791,23 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 0
             };
 
-            adjustment = Some(adjustment_infer);
+            // If inferred value is not consistent with the annotation, report an error.
+            if let Some(adjustment) = adjustment {
+                if adjustment != adjustment_infer {
+                    let mut diag = self.tcx.sess.struct_span_err(
+                        self.tcx.def_span(instance.def_id()),
+                        format!("function annotated to have preemption count adjustment of {adjustment}"),
+                    );
+                    diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
+                    diag.emit();
+                }
+            } else {
+                adjustment = Some(adjustment_infer);
+            }
         }
 
         // Gather expectations.
-        if expectation.is_none() {
+        if !annotation.unchecked || expectation.is_none() {
             let mut expectation_infer = PreemptionCountRange::top();
             for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
                 if data.is_cleanup {
@@ -854,7 +866,27 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     None => (),
                 }
             }
-            expectation = Some(expectation_infer);
+
+            // If inferred value is not consistent with the annotation, report an error.
+            if let Some(expectation) = expectation {
+                let mut expectation_intersect = expectation_infer;
+                expectation_intersect.meet(&expectation);
+                if expectation_intersect != expectation {
+                    let mut diag = self.tcx.sess.struct_span_err(
+                        self.tcx.def_span(instance.def_id()),
+                        format!(
+                            "function annotated to have preemption count expectation of {}",
+                            expectation
+                        ),
+                    );
+                    diag.note(format!(
+                        "but the expectation inferred is {expectation_infer}"
+                    ));
+                    diag.emit();
+                }
+            } else {
+                expectation = Some(expectation_infer);
+            }
         }
 
         Some(FunctionContextProperty {
