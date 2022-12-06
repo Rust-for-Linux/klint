@@ -8,7 +8,7 @@ use crate::atomic_context::PreemptionCountRange;
 pub enum KlintAttribute {
     PreemptionCount {
         adjustment: Option<i32>,
-        assumption: Option<PreemptionCountRange>,
+        expectation: Option<PreemptionCountRange>,
     },
 }
 
@@ -35,7 +35,7 @@ pub fn parse_klint_attribute(
     match item.path.segments[1].ident.name {
         v if v == *crate::symbol::preempt_count => {
             let mut adjustment = None;
-            let mut assumption = None;
+            let mut expectation = None;
 
             let ast::MacArgs::Delimited(delim_span, _, tts) = &item.args else {
                 tcx.struct_span_lint_hir(
@@ -58,7 +58,7 @@ pub fn parse_klint_attribute(
                         hir_id,
                         span,
                         "incorrect usage of `#[kint::preempt_count]`",
-                        |diag| diag.help("`adjust` or `assume` expected"),
+                        |diag| diag.help("`adjust` or `expect` expected"),
                     );
                     None
                 };
@@ -144,7 +144,7 @@ pub fn parse_klint_attribute(
                     let v = if negative { -v } else { v };
                     adjustment = Some(v);
                 } else {
-                    // Parse assumption, which is a range.
+                    // Parse expectation, which is a range.
                     let expect_range = |span| {
                         tcx.struct_span_lint_hir(
                             crate::INCORRECT_ATTRIBUTE,
@@ -254,12 +254,12 @@ pub fn parse_klint_attribute(
                             start_span.until(end_span),
                             "incorrect usage of `#[kint::preempt_count]`",
                             |diag| {
-                                diag.help("the preemption count assumption range must be non-empty")
+                                diag.help("the preemption count expectation range must be non-empty")
                             },
                         );
                     }
 
-                    assumption = Some(PreemptionCountRange { lo: start, hi: end });
+                    expectation = Some(PreemptionCountRange { lo: start, hi: end });
                 }
 
                 // End of attribute arguments.
@@ -294,7 +294,7 @@ pub fn parse_klint_attribute(
                 }
             }
 
-            if adjustment.is_none() && assumption.is_none() {
+            if adjustment.is_none() && expectation.is_none() {
                 tcx.struct_span_lint_hir(
                     crate::INCORRECT_ATTRIBUTE,
                     hir_id,
@@ -306,7 +306,7 @@ pub fn parse_klint_attribute(
 
             Some(KlintAttribute::PreemptionCount {
                 adjustment,
-                assumption,
+                expectation,
             })
         }
         _ => {

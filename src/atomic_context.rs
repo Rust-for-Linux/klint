@@ -23,7 +23,7 @@ use crate::ctxt::AnalysisCtxt;
 //
 // We assign all functions two properties, one is the current preemption count that it expects,
 // and another is the adjustment to the preemption count that it will make. For example, the majority
-// of functions would have an adjustment of zero, and either makes no assumption to the preemption
+// of functions would have an adjustment of zero, and either makes no expectation to the preemption
 // count or requires it to be zero. Taking a spinlock would have an adjustment of 1, and releasing a
 // spinlock would have an adjustment of -1.
 //
@@ -52,8 +52,8 @@ use crate::ctxt::AnalysisCtxt;
 //
 // The first three categories are more fundamental, because the indirection or FFI makes us unable to infer
 // properties in the compile-time. We would therefore have to make some assumptions: all functions are considered
-// to make no adjustments to the preemption count, and all functions have no assumptions on the preemption count.
-// If the functions do not satisfy the assumption, then escape hatch or manual annotation would be required.
+// to make no adjustments to the preemption count, and all functions have no expectations on the preemption count.
+// If the functions do not satisfy the expectation, then escape hatch or manual annotation would be required.
 // This assumption also means that when a function pointer is *created*, it must also satisfy the assumption.
 // Similarly, as using traits with dynamic dispatch is also indirection, we would require explicit markings on
 // trait method signatures.
@@ -61,7 +61,7 @@ use crate::ctxt::AnalysisCtxt;
 // Now finally, recursion. If we want to properly handle recursion, then we are effectively going to find a fixed
 // point globally in a call graph. This is not very practical, so we would instead require explicit markings on
 // these recursive functions, and if unmarked, assume these functions to make no adjustments to the preemption
-// count and have no assumptions on the preemption count.
+// count and have no expectations on the preemption count.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encodable, Decodable)]
 pub struct PreemptionCountRange {
@@ -120,6 +120,7 @@ impl std::fmt::Display for PreemptionCountRange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match (self.lo, self.hi) {
             (lo, None) => write!(f, "{}..", lo),
+            (lo, Some(hi)) if lo >= hi => write!(f, "unsatisfiable"),
             (lo, Some(hi)) if lo + 1 == hi => write!(f, "{lo}"),
             (lo, Some(hi)) => write!(f, "{}..{}", lo, hi),
         }
@@ -287,17 +288,17 @@ pub struct FunctionContextProperty {
     /// Range of preemption count that the function expects.
     ///
     /// Since the preemption count is a non-negative integer, the lower bound is just represented using a `u32`
-    /// and "no assumption" is represented with 0; the upper bound is represented using an `Option<u32>`, with
-    /// `None` representing "no assumption". The upper bound is exclusive so `(0, Some(0))` represents an
+    /// and "no expectation" is represented with 0; the upper bound is represented using an `Option<u32>`, with
+    /// `None` representing "no expectation". The upper bound is exclusive so `(0, Some(0))` represents an
     /// unsatisfiable condition.
-    assumption: PreemptionCountRange,
+    expectation: PreemptionCountRange,
     adjustment: i32,
 }
 
 impl Default for FunctionContextProperty {
     fn default() -> Self {
         FunctionContextProperty {
-            assumption: PreemptionCountRange::top(),
+            expectation: PreemptionCountRange::top(),
             adjustment: 0,
         }
     }
@@ -495,7 +496,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             },
             Some(ResolveResult::TooGeneric) => Some(None),
             Some(ResolveResult::IndirectCall) => Some(Some(FunctionContextProperty {
-                assumption: PreemptionCountRange::top(),
+                expectation: PreemptionCountRange::top(),
                 adjustment: 0,
             })),
             None => None,
@@ -519,7 +520,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // Memory allocations glues depended by liballoc.
             // Allocation functions may sleep.
             "__rust_alloc" | "__rust_alloc_zeroed" | "__rust_realloc" => FunctionContextProperty {
-                assumption: PreemptionCountRange::single_value(0),
+                expectation: PreemptionCountRange::single_value(0),
                 adjustment: 0,
             },
 
@@ -527,19 +528,19 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "__rust_dealloc" => Default::default(),
 
             "spin_lock" => FunctionContextProperty {
-                assumption: PreemptionCountRange::top(),
+                expectation: PreemptionCountRange::top(),
                 adjustment: 1,
             },
             "spin_unlock" => FunctionContextProperty {
-                assumption: PreemptionCountRange { lo: 1, hi: None },
+                expectation: PreemptionCountRange { lo: 1, hi: None },
                 adjustment: -1,
             },
             "__cant_sleep" => FunctionContextProperty {
-                assumption: PreemptionCountRange { lo: 1, hi: None },
+                expectation: PreemptionCountRange { lo: 1, hi: None },
                 adjustment: 0,
             },
             "__might_sleep" | "msleep" => FunctionContextProperty {
-                assumption: PreemptionCountRange::single_value(0),
+                expectation: PreemptionCountRange::single_value(0),
                 adjustment: 0,
             },
             _ => {
@@ -547,7 +548,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
                 // Other functions, assume no context change for now.
                 FunctionContextProperty {
-                    assumption: PreemptionCountRange::top(),
+                    expectation: PreemptionCountRange::top(),
                     adjustment: 0,
                 }
             }
@@ -721,11 +722,11 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         // Use annotation if available.
         let def_id = instance.def_id();
-        let (mut adjustment, mut assumption) = self.preemption_count_annotation(def_id);
-        if adjustment.is_some() || assumption.is_some() {
+        let (mut adjustment, mut expectation) = self.preemption_count_annotation(def_id);
+        if adjustment.is_some() || expectation.is_some() {
             info!(
-                "adjustment {:?} and assumption {:?} from annotation",
-                adjustment, assumption
+                "adjustment {:?} and expectation {:?} from annotation",
+                adjustment, expectation
             );
         }
 
@@ -790,9 +791,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             adjustment = Some(adjustment_infer);
         }
 
-        // Gather assumptions.
-        if assumption.is_none() {
-            let mut assumption_infer = PreemptionCountRange::top();
+        // Gather expectations.
+        if expectation.is_none() {
+            let mut expectation_infer = PreemptionCountRange::top();
             for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
                 if data.is_cleanup {
                     continue;
@@ -803,13 +804,13 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         let adj = *analysis_result.results().entry_set_for_block(b);
 
                         // We need to find a range that for all possible values in `adj`, it will end up in a value
-                        // that lands inside `prop.assumption`.
+                        // that lands inside `prop.expectation`.
                         //
                         // For example, if adjustment is `0..`, and range is `0..1`, then the range we want is `0..0`,
                         // i.e. an empty range, because no matter what preemption count we start with, if we apply an
                         // adjustment >0, then it will be outside the range.
-                        let mut expected = prop.assumption - adj;
-                        expected.meet(&assumption_infer);
+                        let mut expected = prop.expectation - adj;
+                        expected.meet(&expectation_infer);
                         if expected.is_empty() {
                             // This function will cause the entry state to be in an unsatisfiable condition.
                             // Generate an error.
@@ -824,7 +825,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                                 span,
                                 format!(
                                     "this {kind} expects the preemption count to be {}",
-                                    prop.assumption
+                                    prop.expectation
                                 ),
                             );
 
@@ -834,27 +835,27 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
                             diag.note(format!(
                                 "but the possible preemption count at this point is {}",
-                                assumption_infer + adj
+                                expectation_infer + adj
                             ));
                             diag.emit();
 
                             // For failed inference, revert to the default.
-                            assumption_infer = PreemptionCountRange { lo: 0, hi: None };
+                            expectation_infer = PreemptionCountRange { lo: 0, hi: None };
 
                             // Stop processing other calls in this function to avoid generating too many errors.
                             break;
                         }
-                        assumption_infer = expected;
+                        expectation_infer = expected;
                     }
                     Some(None) => unreachable!(),
                     None => (),
                 }
             }
-            assumption = Some(assumption_infer);
+            expectation = Some(expectation_infer);
         }
 
         Some(FunctionContextProperty {
-            assumption: assumption.unwrap(),
+            expectation: expectation.unwrap(),
             adjustment: adjustment.unwrap(),
         })
     }
@@ -1003,7 +1004,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     ) {
         self.local_conn
             .execute(
-                "INSERT OR REPLACE INTO preemption_count_annotation (local_def_id, adjustment, assumption_lo, assumption_hi) VALUES (?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO preemption_count_annotation (local_def_id, adjustment, expectation_lo, expectation_hi) VALUES (?, ?, ?, ?)",
                 rusqlite::params![
                     def_id.index.as_u32(),
                     annotation.0,
@@ -1024,13 +1025,13 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         self
             .sql_connection(def_id.krate)?
             .query_row(
-                "SELECT adjustment, assumption_lo, assumption_hi FROM preemption_count_annotation WHERE local_def_id = ?",
+                "SELECT adjustment, expectation_lo, expectation_hi FROM preemption_count_annotation WHERE local_def_id = ?",
                 rusqlite::params![def_id.index.as_u32()],
                 |row| {
                     let adjustment = row.get(0)?;
-                    let assumption_lo: Option<u32> = row.get(1)?;
-                    let assumption_hi = row.get(2)?;
-                    Ok((adjustment, assumption_lo.map(|lo| PreemptionCountRange { lo, hi: assumption_hi })))
+                    let expectation_lo: Option<u32> = row.get(1)?;
+                    let expectation_hi = row.get(2)?;
+                    Ok((adjustment, expectation_lo.map(|lo| PreemptionCountRange { lo, hi: expectation_hi })))
                 },
             )
             .optional()
@@ -1075,9 +1076,9 @@ memoize! {
             match attr {
                 crate::attribute::KlintAttribute::PreemptionCount {
                     adjustment,
-                    assumption,
+                    expectation,
                 } => {
-                    value = (adjustment, assumption);
+                    value = (adjustment, expectation);
                     break;
                 }
             }
