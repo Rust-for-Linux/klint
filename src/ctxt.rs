@@ -1,13 +1,16 @@
+use std::any::{Any, TypeId};
 use std::cell::RefCell;
 
 use rusqlite::Connection;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::sync::Lrc;
-use rustc_hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
-use rustc_middle::mir;
+use rustc_hir::def_id::{CrateNum, LOCAL_CRATE};
 use rustc_middle::ty::{Instance, TyCtxt};
 
-use crate::atomic_context::FunctionContextProperty;
+pub(crate) trait Query: 'static {
+    type Key<'tcx>;
+    type Value<'tcx>;
+}
 
 pub struct AnalysisCtxt<'tcx> {
     pub tcx: TyCtxt<'tcx>,
@@ -15,12 +18,7 @@ pub struct AnalysisCtxt<'tcx> {
     pub sql_conn: RefCell<FxHashMap<CrateNum, Option<Lrc<Connection>>>>,
 
     pub eval_stack: RefCell<Vec<Instance<'tcx>>>,
-
-    pub analysis_mir: RefCell<FxHashMap<DefId, &'tcx mir::Body<'tcx>>>,
-    pub preemption_count_annotation:
-        RefCell<FxHashMap<DefId, crate::attribute::PreemptionCount>>,
-    pub function_context_property:
-        RefCell<FxHashMap<Instance<'tcx>, Option<FunctionContextProperty>>>,
+    pub query_cache: RefCell<FxHashMap<TypeId, Lrc<dyn Any>>>,
 }
 
 impl<'tcx> std::ops::Deref for AnalysisCtxt<'tcx> {
@@ -33,21 +31,30 @@ impl<'tcx> std::ops::Deref for AnalysisCtxt<'tcx> {
 
 macro_rules! memoize {
     (fn $name:ident<$tcx: lifetime>($cx:ident: $($_: ty)?, $key:ident: $key_ty:ty $(,)?) -> $ret: ty { $($body: tt)* }) => {
+        #[allow(non_camel_case_types)]
+        struct $name;
+
+        impl crate::ctxt::Query for $name {
+            type Key<$tcx> = $key_ty;
+            type Value<$tcx> = $ret;
+        }
+
         impl<'tcx> crate::ctxt::AnalysisCtxt<'tcx> {
             pub fn $name(&self, key: $key_ty) -> $ret {
                 fn inner<$tcx>($cx: &crate::ctxt::AnalysisCtxt<$tcx>, $key: $key_ty) -> $ret {
                     $($body)*
                 }
 
+                let cache = self.query_cache::<$name>();
                 {
-                    let cache = self.$name.borrow();
-                    if let Some(val) = cache.get(&key) {
+                    let guard = cache.borrow();
+                    if let Some(val) = guard.get(&key) {
                         return *val;
                     }
                 }
                 let val = inner(self, key);
-                let mut cache = self.$name.borrow_mut();
-                cache.insert(key, val);
+                let mut guard = cache.borrow_mut();
+                guard.insert(key, val);
                 val
             }
         }
@@ -63,6 +70,27 @@ impl Drop for AnalysisCtxt<'_> {
 }
 
 impl<'tcx> AnalysisCtxt<'tcx> {
+    pub(crate) fn query_cache<Q: Query>(
+        &self,
+    ) -> Lrc<RefCell<FxHashMap<Q::Key<'tcx>, Q::Value<'tcx>>>> {
+        let key = TypeId::of::<Q>();
+        let mut guard = self.query_cache.borrow_mut();
+        let cache = guard
+            .entry(key)
+            .or_insert_with(|| {
+                let cache = Lrc::new(RefCell::new(
+                    FxHashMap::<Q::Key<'static>, Q::Value<'static>>::default(),
+                ));
+                cache
+            })
+            .clone()
+            .downcast::<RefCell<FxHashMap<Q::Key<'static>, Q::Value<'static>>>>()
+            .unwrap();
+        // Everything stored inside query_cache is conceptually `'tcx`, but due to limitation
+        // of `Any` we hack around the lifetime.
+        unsafe { std::mem::transmute(cache) }
+    }
+
     pub(crate) fn sql_connection(&self, cnum: CrateNum) -> Option<Lrc<Connection>> {
         if let Some(v) = self.sql_conn.borrow().get(&cnum) {
             return v.clone();
@@ -158,9 +186,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             local_conn: conn,
             sql_conn: Default::default(),
             eval_stack: Default::default(),
-            analysis_mir: Default::default(),
-            preemption_count_annotation: Default::default(),
-            function_context_property: Default::default(),
+            query_cache: Default::default(),
         }
     }
 }

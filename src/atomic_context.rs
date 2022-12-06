@@ -997,7 +997,7 @@ memoize! {
         let result = cx.compute_property(instance);
 
         // Recursion encountered.
-        if cx.function_context_property.borrow().contains_key(&instance) {
+        if cx.query_cache::<function_context_property>().borrow().contains_key(&instance) {
             if result != Some(Default::default()) {
                 let mut diag = cx.sess.struct_span_err(
                     cx.def_span(instance.def_id()),
