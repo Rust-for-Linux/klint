@@ -1116,6 +1116,13 @@ memoize! {
 }
 
 impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
+    fn check_crate(&mut self,_: &LateContext<'tcx>,) {
+        // Do this before hand to ensure that errors, if any, are nicely sorted.
+        for &def_id in self.cx.mir_keys(()) {
+            let _ = self.cx.preemption_count_annotation(def_id.to_def_id());
+        }
+    }
+
     fn check_fn(
         &mut self,
         cx: &LateContext<'tcx>,
