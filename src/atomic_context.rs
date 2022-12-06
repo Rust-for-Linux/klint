@@ -520,13 +520,14 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
             // Memory allocations glues depended by liballoc.
             // Allocation functions may sleep.
-            "__rust_alloc" | "__rust_alloc_zeroed" | "__rust_realloc" => FunctionContextProperty {
+            "__rust_alloc" | "__rust_alloc_zeroed" | "__rust_realloc" |
+            "__rg_alloc" | "__rg_alloc_zeroed" | "__rg_realloc" => FunctionContextProperty {
                 expectation: PreemptionCountRange::single_value(0),
                 adjustment: 0,
             },
 
             // Deallocation function will not sleep.
-            "__rust_dealloc" => Default::default(),
+            "__rust_dealloc" | "__rg_dealloc" => Default::default(),
 
             "spin_lock" => FunctionContextProperty {
                 expectation: PreemptionCountRange::top(),
