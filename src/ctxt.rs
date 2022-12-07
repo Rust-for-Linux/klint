@@ -30,31 +30,32 @@ impl<'tcx> std::ops::Deref for AnalysisCtxt<'tcx> {
 }
 
 macro_rules! memoize {
-    (fn $name:ident<$tcx: lifetime>($cx:ident: $($_: ty)?, $key:ident: $key_ty:ty $(,)?) -> $ret: ty { $($body: tt)* }) => {
+    ($(#[$attr:meta])* fn $name:ident<$tcx: lifetime>($cx:ident: $($_: ty)?, $($key:ident: $key_ty:ty),* $(,)?) -> $ret: ty { $($body: tt)* }) => {
         #[allow(non_camel_case_types)]
         struct $name;
 
         impl crate::ctxt::Query for $name {
-            type Key<$tcx> = $key_ty;
+            type Key<$tcx> = ($($key_ty,)*);
             type Value<$tcx> = $ret;
         }
 
         impl<'tcx> crate::ctxt::AnalysisCtxt<'tcx> {
-            pub fn $name(&self, key: $key_ty) -> $ret {
-                fn inner<$tcx>($cx: &crate::ctxt::AnalysisCtxt<$tcx>, $key: $key_ty) -> $ret {
+            pub fn $name(&self, $($key: $key_ty,)*) -> $ret {
+                $(#[$attr])*
+                fn inner<$tcx>($cx: &crate::ctxt::AnalysisCtxt<$tcx>, $($key: $key_ty),*) -> $ret {
                     $($body)*
                 }
-
+                let pack = ($($key,)*);
                 let cache = self.query_cache::<$name>();
                 {
                     let guard = cache.borrow();
-                    if let Some(val) = guard.get(&key) {
+                    if let Some(val) = guard.get(&pack) {
                         return *val;
                     }
                 }
-                let val = inner(self, key);
+                let val = inner(self, $($key)*);
                 let mut guard = cache.borrow_mut();
-                guard.insert(key, val);
+                guard.insert(pack, val);
                 val
             }
         }
