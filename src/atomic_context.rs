@@ -6,7 +6,7 @@ use rustc_index::bit_set::BitSet;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::mir::{BasicBlock, Body, Terminator, TerminatorKind};
-use rustc_middle::ty::{self, Instance, InternalSubsts, TyCtxt};
+use rustc_middle::ty::{self, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, TyCtxt};
 use rustc_mir_dataflow::lattice::MeetSemiLattice;
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
@@ -308,6 +308,7 @@ impl Default for FunctionContextProperty {
 struct AdjustmentComputation<'tcx, 'checker> {
     checker: &'checker AnalysisCtxt<'tcx>,
     body: &'tcx Body<'tcx>,
+    param_env: ParamEnv<'tcx>,
     instance: Instance<'tcx>,
     too_generic: Cell<bool>,
 }
@@ -363,21 +364,22 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
             return;
         }
 
-        let prop =
-            match self
-                .checker
-                .resolve_function_property(self.instance, self.body, terminator)
-            {
-                Some(Some(v)) => v,
-                Some(None) => {
-                    // Too generic, need to bail out and retry after monomorphization.
-                    *state = AdjustmentBounds::unbounded();
-                    // Set flag to indicate that the analysis result is not reliable and don't generate errors.
-                    self.too_generic.set(true);
-                    return;
-                }
-                None => return,
-            };
+        let prop = match self.checker.resolve_function_property(
+            self.param_env,
+            self.instance,
+            self.body,
+            terminator,
+        ) {
+            Some(Some(v)) => v,
+            Some(None) => {
+                // Too generic, need to bail out and retry after monomorphization.
+                *state = AdjustmentBounds::unbounded();
+                // Set flag to indicate that the analysis result is not reliable and don't generate errors.
+                self.too_generic.set(true);
+                return;
+            }
+            None => return,
+        };
 
         *state = state.offset(prop.adjustment);
     }
@@ -406,6 +408,7 @@ enum ResolveResult<'tcx> {
 impl<'tcx> AnalysisCtxt<'tcx> {
     fn resolve_function(
         &self,
+        param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
         body: &Body<'tcx>,
         terminator: &Terminator<'tcx>,
@@ -413,15 +416,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let func = match &terminator.kind {
             TerminatorKind::Call { func, .. } => {
                 let callee_ty = func.ty(body, self.tcx);
-                let callee_ty = instance.subst_mir_and_normalize_erasing_regions(
-                    self.tcx,
-                    ty::ParamEnv::reveal_all(),
-                    callee_ty,
-                );
+                let callee_ty = instance
+                    .subst_mir_and_normalize_erasing_regions(self.tcx, param_env, callee_ty);
                 if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
-                    let func =
-                        ty::Instance::resolve(self.tcx, ty::ParamEnv::reveal_all(), def_id, substs)
-                            .unwrap();
+                    let func = ty::Instance::resolve(self.tcx, param_env, def_id, substs).unwrap();
                     match func {
                         Some(func) => func,
                         None => {
@@ -439,18 +437,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             }
             TerminatorKind::Drop { place, .. } => {
                 let ty = place.ty(body, self.tcx).ty;
-                let ty = instance.subst_mir_and_normalize_erasing_regions(
-                    self.tcx,
-                    ty::ParamEnv::reveal_all(),
-                    ty,
-                );
+                let ty = instance.subst_mir_and_normalize_erasing_regions(self.tcx, param_env, ty);
 
                 // Do not call `resolve_drop_in_place` directly as it does double unwrap.
                 let def_id = self.tcx.require_lang_item(LangItem::DropInPlace, None);
                 let substs = self.tcx.intern_substs(&[ty.into()]);
-                let func =
-                    ty::Instance::resolve(self.tcx, ty::ParamEnv::reveal_all(), def_id, substs)
-                        .unwrap();
+                let func = ty::Instance::resolve(self.tcx, param_env, def_id, substs).unwrap();
 
                 match func {
                     Some(func) => func,
@@ -486,15 +478,18 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
     fn resolve_function_property(
         &self,
+        param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
         body: &Body<'tcx>,
         terminator: &Terminator<'tcx>,
     ) -> Option<Option<FunctionContextProperty>> {
-        match self.resolve_function(instance, body, terminator) {
-            Some(ResolveResult::Ok(func)) => match self.function_context_property(func) {
-                Some(v) => Some(Some(v)),
-                None => Some(None),
-            },
+        match self.resolve_function(param_env, instance, body, terminator) {
+            Some(ResolveResult::Ok(func)) => {
+                match self.function_context_property(param_env.and(func)) {
+                    Some(v) => Some(Some(v)),
+                    None => Some(None),
+                }
+            }
             Some(ResolveResult::TooGeneric) => Some(None),
             Some(ResolveResult::IndirectCall) => Some(Some(FunctionContextProperty {
                 expectation: PreemptionCountRange::top(),
@@ -559,6 +554,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
     fn report_adjustment_infer_error(
         &self,
+        param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
         body: &Body<'tcx>,
         analysis_result: &rustc_mir_dataflow::ResultsCursor<
@@ -629,7 +625,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                             .results()
                             .entry_set_for_block(bb)
                             .is_single_value(),
-                        match self.resolve_function_property(instance, body, terminator) {
+                        match self.resolve_function_property(param_env, instance, body, terminator)
+                        {
                             Some(Some(prop)) => prop.adjustment,
                             Some(None) => unreachable!(),
                             None => 0,
@@ -715,10 +712,23 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     }
 
     #[instrument(skip_all, fields(instance=%instance), ret)]
-    pub fn compute_property(&self, instance: Instance<'tcx>) -> Option<FunctionContextProperty> {
-        // No Rust built-in intrinsics will mess with preemption count.
+    pub fn compute_property(
+        &self,
+        param_env: ParamEnv<'tcx>,
+        instance: Instance<'tcx>,
+    ) -> Option<FunctionContextProperty> {
         match instance.def {
+            // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceDef::Intrinsic(_) => return Some(Default::default()),
+            ty::InstanceDef::DropGlue(_, Some(_)) => {
+                if !param_env.caller_bounds().is_empty() {
+                    // Drop shim generation is not very good at this and will ICE.
+                    // Treat this as too generic.
+                    return None;
+                }
+            }
+            // No drop glue, then it definitely won't mess with preemption count.
+            ty::InstanceDef::DropGlue(_, None) => return Some(Default::default()),
             _ => (),
         }
 
@@ -755,6 +765,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let analysis_result = AdjustmentComputation {
             checker: self,
             body: mir,
+            param_env,
             instance,
             too_generic: Cell::new(false),
         }
@@ -788,7 +799,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             } else if let Some(v) = adjustment_infer.is_single_value() {
                 v
             } else {
-                self.report_adjustment_infer_error(instance, mir, &analysis_result);
+                self.report_adjustment_infer_error(param_env, instance, mir, &analysis_result);
                 0
             };
 
@@ -815,7 +826,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     continue;
                 }
 
-                match self.resolve_function_property(instance, mir, data.terminator()) {
+                match self.resolve_function_property(param_env, instance, mir, data.terminator()) {
                     Some(Some(prop)) => {
                         let adj = *analysis_result.results().entry_set_for_block(b);
 
@@ -942,30 +953,45 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     }
 }
 
+struct PolyInstanceDisplay<'a, 'tcx>(&'a ParamEnvAnd<'tcx, Instance<'tcx>>);
+
+impl std::fmt::Display for PolyInstanceDisplay<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (param_env, instance) = self.0.into_parts();
+        write!(f, "{}", instance)?;
+        if !param_env.caller_bounds().is_empty() {
+            write!(f, " where ")?;
+            for (i, predicate) in param_env.caller_bounds().iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", predicate)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 memoize! {
+    #[instrument(skip(cx), fields(poly_instance = %PolyInstanceDisplay(&poly_instance)))]
     fn function_context_property<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
-        instance: Instance<'tcx>,
+        poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
     ) -> Option<FunctionContextProperty> {
+        let (param_env, instance) = poly_instance.into_parts();
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceDef::Intrinsic(_) => return Some(Default::default()),
             _ => (),
         }
 
-        // This will ICE, disable for now.
-        if false {
-            let mut identity = InternalSubsts::identity_for_item(cx.tcx, instance.def_id());
-            if cx.trait_of_item(instance.def_id()).is_some() {
-                // Ensure the `Self` generic arg is kept.
-                identity = cx.intern_substs(
-                    &std::iter::once(instance.substs[0])
-                        .chain(identity[1..].iter().copied())
-                        .collect::<Vec<_>>(),
-                );
-            }
-            if instance.substs != identity {
-                match cx.function_context_property(Instance::new(instance.def_id(), identity)) {
+        let identity_param_env = cx.param_env_reveal_all_normalized(instance.def_id());
+        let identity = InternalSubsts::identity_for_item(cx.tcx, instance.def_id());
+        if !cx.trait_of_item(instance.def_id()).is_some() {
+            let identity_instance = identity_param_env.and(Instance::new(instance.def_id(), identity));
+            if identity_instance != poly_instance {
+                info!("attempt generic version {} {:?} {:?}", PolyInstanceDisplay(&identity_instance), identity_instance, poly_instance);
+                match cx.function_context_property(identity_instance) {
                     Some(v) => return Some(v),
                     None => (),
                 }
@@ -990,20 +1016,34 @@ memoize! {
 
         if cx.eval_stack.borrow().contains(&instance) {
             // Recursion encountered.
-            return Some(Default::default());
+            if param_env.caller_bounds().is_empty() {
+                return Some(Default::default());
+            } else {
+                // If we are handling generic functions, then defer decision to monomorphization time.
+                return None;
+            }
         }
 
         cx.eval_stack.borrow_mut().push(instance);
-        let result = cx.compute_property(instance);
+        let result = cx.compute_property(param_env, instance);
 
         // Recursion encountered.
-        if cx,query_cache::<function_context_property>().borrow().contains_key(&(instance,)) {
-            if result != Some(Default::default()) {
+        if let Some(recur) = cx
+            .query_cache::<function_context_property>()
+            .borrow()
+            .get(&(poly_instance,))
+        {
+            if result != *recur {
                 let mut diag = cx.sess.struct_span_err(
                     cx.def_span(instance.def_id()),
                     "this function is recursive but carries no context specification",
                 );
-                diag.note(format!("Inferred as {:?}", result));
+                if let Some(property) = result {
+                    diag.note(format!(
+                        "adjustment is inferred to be {} and expectation is inferred to be {}",
+                        property.adjustment, property.expectation
+                    ));
+                }
                 diag.emit();
             }
         }
@@ -1116,7 +1156,7 @@ memoize! {
 }
 
 impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
-    fn check_crate(&mut self,_: &LateContext<'tcx>,) {
+    fn check_crate(&mut self, _: &LateContext<'tcx>) {
         // Do this before hand to ensure that errors, if any, are nicely sorted.
         for &def_id in self.cx.mir_keys(()) {
             let _ = self.cx.preemption_count_annotation(def_id.to_def_id());
@@ -1132,11 +1172,6 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         _: rustc_span::Span,
         _hir_id: rustc_hir::HirId,
     ) {
-        // This will ICE, disable for now.
-        if true {
-            return;
-        }
-
         let def_id = cx.tcx.hir().body_owner_def_id(body.id());
 
         // Building MIR for `fn`s with unsatisfiable preds results in ICE.
@@ -1146,7 +1181,11 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
 
         let identity = InternalSubsts::identity_for_item(self.cx.tcx, def_id.into());
         let instance = Instance::new(def_id.into(), identity);
-        self.cx.function_context_property(instance);
+        self.cx.function_context_property(
+            self.cx
+                .param_env_reveal_all_normalized(def_id)
+                .and(instance),
+        );
     }
 
     fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
@@ -1158,7 +1197,8 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
 
         for mono_item in mono_items {
             if let MonoItem::Fn(instance) = mono_item {
-                self.cx.function_context_property(instance);
+                self.cx
+                    .function_context_property(ParamEnv::reveal_all().and(instance));
             }
         }
 
