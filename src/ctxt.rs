@@ -42,7 +42,7 @@ macro_rules! memoize {
         impl<'tcx> crate::ctxt::AnalysisCtxt<'tcx> {
             pub fn $name(&self, $($key: $key_ty,)*) -> $ret {
                 $(#[$attr])*
-                fn inner<$tcx>($cx: &crate::ctxt::AnalysisCtxt<$tcx>, $($key: $key_ty),*) -> $ret {
+                fn $name<$tcx>($cx: &crate::ctxt::AnalysisCtxt<$tcx>, $($key: $key_ty),*) -> $ret {
                     $($body)*
                 }
                 let pack = ($($key,)*);
@@ -53,7 +53,7 @@ macro_rules! memoize {
                         return *val;
                     }
                 }
-                let val = inner(self, $($key)*);
+                let val = $name(self, $($key)*);
                 let mut guard = cache.borrow_mut();
                 guard.insert(pack, val);
                 val
