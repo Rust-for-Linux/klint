@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use rustc_hir::def_id::DefId;
-use rustc_hir::LangItem;
+use rustc_hir::{Constness, LangItem};
 use rustc_index::bit_set::BitSet;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mir::mono::MonoItem;
@@ -985,8 +985,8 @@ memoize! {
             _ => (),
         }
 
-        let identity_param_env = cx.param_env_reveal_all_normalized(instance.def_id());
-        let identity = InternalSubsts::identity_for_item(cx.tcx, instance.def_id());
+        let identity_param_env = cx.param_env_reveal_all_normalized(instance.def_id()).with_constness(Constness::NotConst);
+        let identity = cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
         if !cx.trait_of_item(instance.def_id()).is_some() {
             let identity_instance = identity_param_env.and(Instance::new(instance.def_id(), identity));
             if identity_instance != poly_instance {
@@ -1179,11 +1179,15 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
             return;
         }
 
-        let identity = InternalSubsts::identity_for_item(self.cx.tcx, def_id.into());
+        let identity = cx.tcx.erase_regions(InternalSubsts::identity_for_item(
+            self.cx.tcx,
+            def_id.into(),
+        ));
         let instance = Instance::new(def_id.into(), identity);
         self.cx.function_context_property(
             self.cx
                 .param_env_reveal_all_normalized(def_id)
+                .with_constness(Constness::NotConst)
                 .and(instance),
         );
     }
