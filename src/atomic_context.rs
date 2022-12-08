@@ -719,13 +719,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceDef::Intrinsic(_) => return Some(Default::default()),
-            ty::InstanceDef::DropGlue(_, Some(_)) => {
-                if !param_env.caller_bounds().is_empty() {
-                    // Drop shim generation is not very good at this and will ICE.
-                    // Treat this as too generic.
-                    return None;
-                }
-            }
             // No drop glue, then it definitely won't mess with preemption count.
             ty::InstanceDef::DropGlue(_, None) => return Some(Default::default()),
             _ => (),
@@ -748,7 +741,11 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         ));
 
         let mir = match instance.def {
-            ty::InstanceDef::DropGlue(_, _) => self.analysis_instance_mir(instance.def),
+            ty::InstanceDef::DropGlue(def_id, Some(ty)) => {
+                self.tcx.arena.alloc(crate::mir::drop_shim::build_drop_shim(
+                    self.tcx, def_id, param_env, ty,
+                ))
+            }
             ty::InstanceDef::Item(def_id) => self.analysis_mir(def_id.did),
             _ => self.analysis_instance_mir(instance.def),
         };

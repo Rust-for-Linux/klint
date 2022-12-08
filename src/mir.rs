@@ -1,3 +1,5 @@
+pub mod drop_shim;
+
 use std::sync::atomic::AtomicPtr;
 use std::sync::atomic::Ordering;
 use std::sync::{LazyLock, Mutex};
