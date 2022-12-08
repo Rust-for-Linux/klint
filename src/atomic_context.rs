@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use rustc_hir::def_id::DefId;
+use rustc_hir::def_id::{CrateNum, DefId, DefIndex};
 use rustc_hir::{Constness, LangItem};
 use rustc_index::bit_set::BitSet;
 use rustc_lint::{LateContext, LateLintPass};
@@ -10,7 +10,6 @@ use rustc_middle::ty::{self, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, Ty
 use rustc_mir_dataflow::lattice::MeetSemiLattice;
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
-use rustc_serialize::{Decodable, Encodable};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
 
 use crate::attribute::PreemptionCount as PreemptionCountAttr;
@@ -906,51 +905,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             adjustment: adjustment.unwrap(),
         })
     }
-
-    #[instrument(skip(self))]
-    fn store_property(&self, instance: Instance<'tcx>, property: Option<FunctionContextProperty>) {
-        let mut enc = crate::serde::EncodeContext::new(self.tcx);
-        instance.encode(&mut enc);
-        let instance_enc = enc.finish();
-
-        let mut enc = crate::serde::EncodeContext::new(self.tcx);
-        property.encode(&mut enc);
-        let property_enc = enc.finish();
-
-        instance.def_id().expect_local();
-
-        self.local_conn
-            .execute(
-                "INSERT OR REPLACE INTO function_context_property (instance, property) VALUES (?, ?)",
-                rusqlite::params![
-                    instance_enc,
-                    property_enc,
-                ],
-            )
-            .unwrap();
-    }
-
-    #[instrument(skip(self))]
-    fn load_property(&self, instance: Instance<'tcx>) -> Option<Option<FunctionContextProperty>> {
-        use rusqlite::OptionalExtension;
-
-        let mut enc = crate::serde::EncodeContext::new(self.tcx);
-        instance.encode(&mut enc);
-        let instance_enc = enc.finish();
-
-        let property_enc: Vec<u8> = self
-            .sql_connection(instance.def_id().krate)?
-            .query_row(
-                "SELECT property FROM function_context_property WHERE instance = ?",
-                rusqlite::params![instance_enc,],
-                |row| row.get(0),
-            )
-            .optional()
-            .unwrap()?;
-        let mut dec = crate::serde::DecodeContext::new(self.tcx, &property_enc);
-        let property = <Option<_>>::decode(&mut dec);
-        Some(property)
-    }
 }
 
 struct PolyInstanceDisplay<'a, 'tcx>(&'a ParamEnvAnd<'tcx, Instance<'tcx>>);
@@ -987,9 +941,11 @@ memoize! {
 
         let identity_param_env = cx.param_env_reveal_all_normalized(instance.def_id()).with_constness(Constness::NotConst);
         let identity = cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
+        let mut generic = false;
         if !cx.trait_of_item(instance.def_id()).is_some() {
             let identity_instance = identity_param_env.and(Instance::new(instance.def_id(), identity));
-            if identity_instance != poly_instance {
+            generic = identity_instance == poly_instance;
+            if !generic {
                 info!("attempt generic version {} {:?} {:?}", PolyInstanceDisplay(&identity_instance), identity_instance, poly_instance);
                 match cx.function_context_property(identity_instance) {
                     Some(v) => return Some(v),
@@ -1003,7 +959,8 @@ memoize! {
         }
 
         if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
-            if let Some(p) = cx.load_property(instance) {
+            if let Some(p) = cx.sql_load::<function_context_property>(poly_instance)
+            {
                 return p;
             }
 
@@ -1048,12 +1005,21 @@ memoize! {
             }
         }
 
-        if instance.def_id().is_local() {
-            cx.store_property(instance, result);
+        if instance.def_id().is_local() && (generic || param_env.caller_bounds().is_empty()) {
+            cx.sql_store::<function_context_property>(poly_instance, result);
         }
 
         cx.eval_stack.borrow_mut().pop();
         result
+    }
+}
+
+impl crate::ctxt::PersistentQuery for function_context_property {
+    type LocalKey<'tcx> = Instance<'tcx>;
+
+    fn into_crate_and_local<'tcx>(key: Self::Key<'tcx>) -> (CrateNum, Self::LocalKey<'tcx>) {
+        let instance = key.value;
+        (instance.def_id().krate, instance)
     }
 }
 
@@ -1072,47 +1038,6 @@ impl<'tcx> AtomicContext<'tcx> {
 impl_lint_pass!(AtomicContext<'_> => [ATOMIC_CONTEXT]);
 
 impl<'tcx> AnalysisCtxt<'tcx> {
-    #[instrument(skip(self))]
-    fn store_preemption_count_annotation(&self, def_id: DefId, annotation: PreemptionCountAttr) {
-        self.local_conn
-            .execute(
-                "INSERT OR REPLACE INTO preemption_count_annotation (local_def_id, adjustment, expectation_lo, expectation_hi, unchecked) VALUES (?, ?, ?, ?, ?)",
-                rusqlite::params![
-                    def_id.index.as_u32(),
-                    annotation.adjustment,
-                    annotation.expectation.map(|r| r.lo),
-                    annotation.expectation.and_then(|r| r.hi),
-                    annotation.unchecked,
-                ],
-            )
-            .unwrap();
-    }
-
-    #[instrument(skip(self))]
-    fn load_preemption_count_annotation(&self, def_id: DefId) -> Option<PreemptionCountAttr> {
-        use rusqlite::OptionalExtension;
-
-        self
-            .sql_connection(def_id.krate)?
-            .query_row(
-                "SELECT adjustment, expectation_lo, expectation_hi, unchecked FROM preemption_count_annotation WHERE local_def_id = ?",
-                rusqlite::params![def_id.index.as_u32()],
-                |row| {
-                    let adjustment = row.get(0)?;
-                    let expectation_lo: Option<u32> = row.get(1)?;
-                    let expectation_hi = row.get(2)?;
-                    let unchecked = row.get(3)?;
-                    Ok(PreemptionCountAttr {
-                        adjustment,
-                        expectation: expectation_lo.map(|lo| PreemptionCountRange { lo, hi: expectation_hi }),
-                        unchecked,
-                    })
-                },
-            )
-            .optional()
-            .unwrap()
-    }
-
     fn preemption_count_annotation_fallback(&self, def_id: DefId) -> PreemptionCountAttr {
         match self.crate_name(def_id.krate).as_str() {
             // Happens in a test environment where build-std is not enabled.
@@ -1134,7 +1059,7 @@ memoize! {
         def_id: DefId,
     ) -> PreemptionCountAttr {
         let Some(local_def_id) = def_id.as_local() else {
-            if let Some(v) = cx.load_preemption_count_annotation(def_id) {
+            if let Some(v) = cx.sql_load::<preemption_count_annotation>(def_id) {
                 return v;
             }
             return cx.preemption_count_annotation_fallback(def_id);
@@ -1152,6 +1077,14 @@ memoize! {
         }
 
         Default::default()
+    }
+}
+
+impl crate::ctxt::PersistentQuery for preemption_count_annotation {
+    type LocalKey<'tcx> = DefIndex;
+
+    fn into_crate_and_local<'tcx>(key: Self::Key<'tcx>) -> (CrateNum, Self::LocalKey<'tcx>) {
+        (key.krate, key.index)
     }
 }
 
@@ -1211,7 +1144,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         for &def_id in self.cx.mir_keys(()) {
             let annotation = self.cx.preemption_count_annotation(def_id.to_def_id());
             self.cx
-                .store_preemption_count_annotation(def_id.to_def_id(), annotation);
+                .sql_store::<preemption_count_annotation>(def_id.to_def_id(), annotation);
         }
     }
 }

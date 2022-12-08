@@ -1,15 +1,44 @@
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::sync::Lrc;
 use rustc_hir::def_id::{CrateNum, LOCAL_CRATE};
 use rustc_middle::ty::{Instance, TyCtxt};
+use rustc_serialize::{Decodable, Encodable};
 
 pub(crate) trait Query: 'static {
+    const NAME: &'static str;
+
     type Key<'tcx>;
     type Value<'tcx>;
+}
+
+pub(crate) trait QueryValueDecodable: Query {
+    fn encode_value<'tcx>(value: &Self::Value<'tcx>, cx: &mut crate::serde::EncodeContext<'tcx>);
+
+    fn decode_value<'a, 'tcx>(cx: &mut crate::serde::DecodeContext<'a, 'tcx>) -> Self::Value<'tcx>;
+}
+
+impl<Q: Query> QueryValueDecodable for Q
+where
+    for<'a, 'tcx> Q::Value<'tcx>: Encodable<crate::serde::EncodeContext<'tcx>>
+        + Decodable<crate::serde::DecodeContext<'a, 'tcx>>,
+{
+    fn encode_value<'tcx>(value: &Self::Value<'tcx>, cx: &mut crate::serde::EncodeContext<'tcx>) {
+        Encodable::encode(value, cx)
+    }
+
+    fn decode_value<'a, 'tcx>(cx: &mut crate::serde::DecodeContext<'a, 'tcx>) -> Self::Value<'tcx> {
+        Decodable::decode(cx)
+    }
+}
+
+pub(crate) trait PersistentQuery: QueryValueDecodable {
+    type LocalKey<'tcx>: Encodable<crate::serde::EncodeContext<'tcx>>;
+
+    fn into_crate_and_local<'tcx>(key: Self::Key<'tcx>) -> (CrateNum, Self::LocalKey<'tcx>);
 }
 
 pub struct AnalysisCtxt<'tcx> {
@@ -35,6 +64,8 @@ macro_rules! memoize {
         pub(crate) struct $name;
 
         impl crate::ctxt::Query for $name {
+            const NAME: &'static str = core::stringify!($name);
+
             #[allow(unused_parens)]
             type Key<$tcx> = ($($key_ty),*);
             type Value<$tcx> = $ret;
@@ -148,6 +179,59 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         result
     }
 
+    pub(crate) fn sql_create_table<Q: Query>(&self) {
+        self.local_conn
+            .execute_batch(&format!(
+                "CREATE TABLE {} (key BLOB PRIMARY KEY, value BLOB);",
+                Q::NAME
+            ))
+            .unwrap();
+    }
+
+    pub(crate) fn sql_load<Q: PersistentQuery>(&self, key: Q::Key<'tcx>) -> Option<Q::Value<'tcx>> {
+        let (cnum, local_key) = Q::into_crate_and_local(key);
+
+        let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx);
+        local_key.encode(&mut encode_ctx);
+        let encoded = encode_ctx.finish();
+
+        let value_encoded: Vec<u8> = self
+            .sql_connection(cnum)?
+            .query_row(
+                &format!("SELECT value FROM {} WHERE key = ?", Q::NAME),
+                rusqlite::params![encoded],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()?;
+        let mut decode_ctx = crate::serde::DecodeContext::new(self.tcx, &value_encoded);
+        let value = Q::decode_value(&mut decode_ctx);
+        Some(value)
+    }
+
+    pub(crate) fn sql_store<Q: PersistentQuery>(&self, key: Q::Key<'tcx>, value: Q::Value<'tcx>) {
+        let (cnum, local_key) = Q::into_crate_and_local(key);
+        assert!(cnum == LOCAL_CRATE);
+
+        let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx);
+        local_key.encode(&mut encode_ctx);
+        let key_encoded = encode_ctx.finish();
+
+        let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx);
+        Q::encode_value(&value, &mut encode_ctx);
+        let value_encoded = encode_ctx.finish();
+
+        self.local_conn
+            .execute(
+                &format!(
+                    "INSERT OR REPLACE INTO {} (key, value) VALUES (?, ?)",
+                    Q::NAME
+                ),
+                rusqlite::params![key_encoded, value_encoded],
+            )
+            .unwrap();
+    }
+
     pub fn new(tcx: TyCtxt<'tcx>) -> Self {
         let crate_name = tcx.crate_name(LOCAL_CRATE);
         let output_filenames = tcx.output_filenames(());
@@ -176,19 +260,20 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             Ok(())
         })
         .unwrap();
-
-        conn.execute_batch(include_str!("mir/schema.sql")).unwrap();
-        conn.execute_batch(include_str!("schema.sql")).unwrap();
+        conn.execute("begin immediate", ()).unwrap();
         conn.pragma_update(None, "user_version", &SCHEMA_VERSION)
             .unwrap();
-        conn.execute("begin immediate", ()).unwrap();
 
-        Self {
+        let ret = Self {
             tcx,
             local_conn: conn,
             sql_conn: Default::default(),
             eval_stack: Default::default(),
             query_cache: Default::default(),
-        }
+        };
+        ret.sql_create_table::<crate::atomic_context::preemption_count_annotation>();
+        ret.sql_create_table::<crate::atomic_context::function_context_property>();
+        ret.sql_create_table::<crate::mir::analysis_mir>();
+        ret
     }
 }

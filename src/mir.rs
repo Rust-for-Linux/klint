@@ -9,10 +9,11 @@ use rustc_middle::mir::{
     StatementKind, TerminatorKind,
 };
 use rustc_middle::ty::{self, TyCtxt};
-use rustc_span::def_id::{DefId, LocalDefId};
+use rustc_span::def_id::{CrateNum, DefId, DefIndex, LocalDefId};
 use rustc_span::sym;
 
 use crate::ctxt::AnalysisCtxt;
+use crate::ctxt::PersistentQuery;
 
 // HACK: we can't add new queries to `TyCtxt` without changing rustc code, so
 // use this as a "poor man's query" for now.
@@ -112,7 +113,7 @@ memoize! {
     fn analysis_mir<'tcx>(cx: &AnalysisCtxt<'tcx>, def_id: DefId) -> &'tcx Body<'tcx> {
         if let Some(local_def_id) = def_id.as_local() {
             local_analysis_mir(cx.tcx, local_def_id)
-        } else if let Some(mir) = cx.load_mir(def_id) {
+        } else if let Some(mir) = cx.sql_load::<analysis_mir>(def_id) {
             mir
         } else {
             cx.optimized_mir(def_id)
@@ -120,42 +121,15 @@ memoize! {
     }
 }
 
+impl PersistentQuery for analysis_mir {
+    type LocalKey<'tcx> = DefIndex;
+
+    fn into_crate_and_local<'tcx>(key: Self::Key<'tcx>) -> (CrateNum, Self::LocalKey<'tcx>) {
+        (key.krate, key.index)
+    }
+}
+
 impl<'tcx> AnalysisCtxt<'tcx> {
-    #[instrument(skip(self, mir))]
-    fn store_mir(&self, def_id: DefId, mir: &Body<'tcx>) {
-        use rustc_serialize::Encodable;
-
-        let mut enc = crate::serde::EncodeContext::new(self.tcx);
-        mir.encode(&mut enc);
-        let enc_result = enc.finish();
-        self.local_conn
-            .execute(
-                "INSERT OR REPLACE INTO mir (local_def_id, mir) VALUES (?, ?)",
-                rusqlite::params![def_id.index.as_u32(), enc_result],
-            )
-            .unwrap();
-    }
-
-    #[instrument(skip(self))]
-    fn load_mir(&self, def_id: DefId) -> Option<&'tcx Body<'tcx>> {
-        use rusqlite::OptionalExtension;
-        use rustc_serialize::Decodable;
-
-        let mir_enc: Vec<u8> = self
-            .sql_connection(def_id.krate)?
-            .query_row(
-                "SELECT mir FROM mir WHERE local_def_id = ?",
-                rusqlite::params![def_id.index.as_u32()],
-                |row| row.get(0),
-            )
-            .optional()
-            .unwrap()?;
-        let _ = self.tcx.optimized_mir(def_id);
-        let mut dec = crate::serde::DecodeContext::new(self.tcx, &mir_enc);
-        let mir = <&Body<'tcx>>::decode(&mut dec);
-        Some(mir)
-    }
-
     /// Save all MIRs defined in the current crate to the database.
     pub fn encode_mir(&self) {
         let tcx = self.tcx;
@@ -175,7 +149,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
             if should_encode {
                 let mir = self.analysis_mir(def_id.into());
-                self.store_mir(def_id.into(), mir);
+                self.sql_store::<analysis_mir>(def_id.into(), mir);
             }
         }
     }
