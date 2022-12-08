@@ -1031,7 +1031,7 @@ memoize! {
         if let Some(recur) = cx
             .query_cache::<function_context_property>()
             .borrow()
-            .get(&(poly_instance,))
+            .get(&poly_instance)
         {
             if result != *recur {
                 let mut diag = cx.sess.struct_span_err(

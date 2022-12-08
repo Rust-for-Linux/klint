@@ -32,10 +32,11 @@ impl<'tcx> std::ops::Deref for AnalysisCtxt<'tcx> {
 macro_rules! memoize {
     ($(#[$attr:meta])* fn $name:ident<$tcx: lifetime>($cx:ident: $($_: ty)?, $($key:ident: $key_ty:ty),* $(,)?) -> $ret: ty { $($body: tt)* }) => {
         #[allow(non_camel_case_types)]
-        struct $name;
+        pub(crate) struct $name;
 
         impl crate::ctxt::Query for $name {
-            type Key<$tcx> = ($($key_ty,)*);
+            #[allow(unused_parens)]
+            type Key<$tcx> = ($($key_ty),*);
             type Value<$tcx> = $ret;
         }
 
@@ -45,7 +46,7 @@ macro_rules! memoize {
                 fn $name<$tcx>($cx: &crate::ctxt::AnalysisCtxt<$tcx>, $($key: $key_ty),*) -> $ret {
                     $($body)*
                 }
-                let pack = ($($key,)*);
+                let pack = ($($key),*);
                 let cache = self.query_cache::<$name>();
                 {
                     let guard = cache.borrow();
