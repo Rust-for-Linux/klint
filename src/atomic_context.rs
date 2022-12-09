@@ -921,7 +921,7 @@ impl std::fmt::Display for PolyInstanceDisplay<'_, '_> {
     }
 }
 
-memoize! {
+memoize!(
     #[instrument(skip(cx), fields(poly_instance = %PolyInstanceDisplay(&poly_instance)))]
     fn function_context_property<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
@@ -934,14 +934,23 @@ memoize! {
             _ => (),
         }
 
-        let identity_param_env = cx.param_env_reveal_all_normalized(instance.def_id()).with_constness(Constness::NotConst);
-        let identity = cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
+        let identity_param_env = cx
+            .param_env_reveal_all_normalized(instance.def_id())
+            .with_constness(Constness::NotConst);
+        let identity =
+            cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
         let mut generic = false;
         if !cx.trait_of_item(instance.def_id()).is_some() {
-            let identity_instance = identity_param_env.and(Instance::new(instance.def_id(), identity));
+            let identity_instance =
+                identity_param_env.and(Instance::new(instance.def_id(), identity));
             generic = identity_instance == poly_instance;
             if !generic {
-                info!("attempt generic version {} {:?} {:?}", PolyInstanceDisplay(&identity_instance), identity_instance, poly_instance);
+                info!(
+                    "attempt generic version {} {:?} {:?}",
+                    PolyInstanceDisplay(&identity_instance),
+                    identity_instance,
+                    poly_instance
+                );
                 match cx.function_context_property(identity_instance) {
                     Some(v) => return Some(v),
                     None => (),
@@ -954,8 +963,7 @@ memoize! {
         }
 
         if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
-            if let Some(p) = cx.sql_load::<function_context_property>(poly_instance)
-            {
+            if let Some(p) = cx.sql_load::<function_context_property>(poly_instance) {
                 return p;
             }
 
@@ -1007,7 +1015,7 @@ memoize! {
         cx.eval_stack.borrow_mut().pop();
         result
     }
-}
+);
 
 impl crate::ctxt::PersistentQuery for function_context_property {
     type LocalKey<'tcx> = Instance<'tcx>;
@@ -1048,7 +1056,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     }
 }
 
-memoize! {
+memoize!(
     fn preemption_count_annotation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         def_id: DefId,
@@ -1073,7 +1081,7 @@ memoize! {
 
         Default::default()
     }
-}
+);
 
 impl crate::ctxt::PersistentQuery for preemption_count_annotation {
     type LocalKey<'tcx> = DefIndex;

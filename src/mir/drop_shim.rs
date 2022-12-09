@@ -5,7 +5,7 @@ use rustc_hir::def_id::DefId;
 use rustc_index::vec::{Idx, IndexVec};
 use rustc_middle::mir::patch::MirPatch;
 use rustc_middle::mir::*;
-use rustc_middle::ty::{self, InternalSubsts, ParamEnv, Ty, TyCtxt};
+use rustc_middle::ty::{self, ParamEnv, Ty, TyCtxt};
 use rustc_mir_dataflow::elaborate_drops::{self, *};
 use rustc_span::Span;
 use rustc_target::abi::VariantIdx;

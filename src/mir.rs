@@ -111,7 +111,7 @@ fn remap_mir_for_const_eval_select<'tcx>(
     body
 }
 
-memoize! {
+memoize!(
     fn analysis_mir<'tcx>(cx: &AnalysisCtxt<'tcx>, def_id: DefId) -> &'tcx Body<'tcx> {
         if let Some(local_def_id) = def_id.as_local() {
             local_analysis_mir(cx.tcx, local_def_id)
@@ -121,7 +121,7 @@ memoize! {
             cx.optimized_mir(def_id)
         }
     }
-}
+);
 
 impl PersistentQuery for analysis_mir {
     type LocalKey<'tcx> = DefIndex;
