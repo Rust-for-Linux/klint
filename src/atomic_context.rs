@@ -6,7 +6,7 @@ use rustc_index::bit_set::BitSet;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::mir::{BasicBlock, Body, Terminator, TerminatorKind};
-use rustc_middle::ty::{self, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, TyCtxt};
+use rustc_middle::ty::{self, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, Ty, TyCtxt};
 use rustc_mir_dataflow::lattice::MeetSemiLattice;
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
@@ -403,6 +403,175 @@ enum ResolveResult<'tcx> {
     TooGeneric,
     IndirectCall,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TooGeneric;
+
+impl<'tcx> AnalysisCtxt<'tcx> {
+    fn drop_adjustment_overflow(
+        &self,
+        poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
+    ) -> Result<i32, TooGeneric> {
+        let mut diag = self.sess.struct_err(format!(
+            "preemption count overflow when trying to compute adjustment of type `{}",
+            PolyDisplay(&poly_ty)
+        ));
+        diag.emit();
+        return Ok(0);
+    }
+}
+
+memoize!(
+    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)))]
+    fn drop_adjustment<'tcx>(
+        cx: &AnalysisCtxt<'tcx>,
+        poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
+    ) -> Result<i32, TooGeneric> {
+        let (param_env, ty) = poly_ty.into_parts();
+
+        // If the type doesn't need drop, then there is trivially no adjustment.
+        if !ty.needs_drop(cx.tcx, param_env) {
+            return Ok(0);
+        }
+
+        match ty.kind() {
+            ty::Closure(_, substs) => {
+                let mut adj = 0i32;
+                for elem_ty in substs.as_closure().upvar_tys() {
+                    let elem_adj = cx.drop_adjustment(param_env.and(elem_ty))?;
+                    let Some(new_adj) = adj.checked_add(elem_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
+                    adj = new_adj;
+                }
+                return Ok(adj);
+            }
+
+            // Generator drops are non-trivial, use the generated drop shims instead.
+            ty::Generator(..) => (),
+
+            ty::Tuple(list) => {
+                let mut adj = 0i32;
+                for elem_ty in list.iter() {
+                    let elem_adj = cx.drop_adjustment(param_env.and(elem_ty))?;
+                    let Some(new_adj) = adj.checked_add(elem_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
+                    adj = new_adj;
+                }
+                return Ok(adj);
+            }
+
+            ty::Adt(def, _) => {
+                // For Adts, we first try to not use any of the substs and just try the most
+                // polymorphic version of the type.
+                let poly_param_env = cx.param_env_reveal_all_normalized(def.did());
+                let poly_substs =
+                    cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
+                let poly_poly_ty = poly_param_env.and(cx.tcx.mk_ty(ty::Adt(*def, poly_substs)));
+                if poly_poly_ty != poly_ty {
+                    if let Ok(adjustment) = cx.drop_adjustment(poly_poly_ty) {
+                        return Ok(adjustment);
+                    }
+                }
+
+                // If that fails, we try to use the substs.
+                // Fallthrough to the MIR drop shim based logic.
+            }
+
+            ty::Dynamic(..) => {
+                cx.sess.warn(format!(
+                    "klint cannot yet check drop of dynamically sized `{}`",
+                    PolyDisplay(&poly_ty)
+                ));
+                return Ok(0);
+            }
+
+            ty::Array(elem_ty, size) => {
+                let size = size.try_eval_usize(cx.tcx, param_env).ok_or(TooGeneric)?;
+                if size == 0 {
+                    return Ok(0);
+                }
+                let elem_adj = cx.drop_adjustment(param_env.and(*elem_ty))?;
+                if elem_adj == 0 {
+                    return Ok(0);
+                }
+                let Ok(size) = i32::try_from(size) else { return cx.drop_adjustment_overflow(poly_ty); };
+                let Some(adj) = size.checked_mul(elem_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
+                return Ok(adj);
+            }
+
+            ty::Slice(elem_ty) => {
+                let elem_adj = cx.drop_adjustment(param_env.and(*elem_ty))?;
+                if elem_adj != 0 {
+                    let mut diag = cx.sess.struct_err(
+                        "dropping element of slice causes non-zero preemption count adjustment",
+                    );
+                    diag.note(format!(
+                        "adjustment for dropping `{}` is {}",
+                        elem_ty, elem_adj
+                    ));
+                    diag.note(
+                        "because slice can contain variable number of elements, adjustment \
+                               for dropping the slice cannot be computed statically",
+                    );
+                    // TODO: will be more helpful if we can point to the place of drop
+                    diag.emit();
+                }
+                return Ok(0);
+            }
+
+            _ => return Err(TooGeneric),
+        }
+
+        // Do not call `resolve_drop_in_place` directly as it does double unwrap.
+        let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
+        let substs = cx.intern_substs(&[ty.into()]);
+        let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
+            .unwrap()
+            .ok_or(TooGeneric)?;
+
+        assert!(matches!(
+            instance.def,
+            ty::InstanceDef::DropGlue(_, Some(_))
+        ));
+
+        if cx.eval_stack.borrow().contains(&instance) {
+            // Recursion encountered.
+            if param_env.caller_bounds().is_empty() {
+                return Ok(0);
+            } else {
+                // If we are handling generic functions, then defer decision to monomorphization time.
+                return Err(TooGeneric);
+            }
+        }
+
+        cx.eval_stack.borrow_mut().push(instance);
+        let result = cx
+            .compute_property(param_env, instance)
+            .map(|x| x.adjustment)
+            .ok_or(TooGeneric);
+
+        // Recursion encountered.
+        if let Some(&recur) = cx.query_cache::<drop_adjustment>().borrow().get(&poly_ty) {
+            match (result, recur) {
+                (Err(_), Err(_)) => (),
+                (Ok(a), Ok(b)) if a == b => (),
+                (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
+                (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
+                (Ok(adj), Ok(_)) => {
+                    let mut diag = cx.sess.struct_span_err(
+                        ty.ty_adt_def()
+                            .map(|x| cx.def_span(x.did()))
+                            .unwrap_or_else(|| cx.def_span(instance.def_id())),
+                        "dropping this type causes recursion but preemption count adjustment is not 0",
+                    );
+                    diag.note(format!("adjustment is inferred to be {}", adj));
+                    diag.note(format!("type being dropped is `{}`", ty));
+                    diag.emit();
+                }
+            }
+        }
+        cx.eval_stack.borrow_mut().pop();
+        result
+    }
+);
 
 impl<'tcx> AnalysisCtxt<'tcx> {
     fn resolve_function(
@@ -902,9 +1071,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     }
 }
 
-struct PolyInstanceDisplay<'a, 'tcx>(&'a ParamEnvAnd<'tcx, Instance<'tcx>>);
+struct PolyDisplay<'a, 'tcx, T>(&'a ParamEnvAnd<'tcx, T>);
 
-impl std::fmt::Display for PolyInstanceDisplay<'_, '_> {
+impl<T> std::fmt::Display for PolyDisplay<'_, '_, T>
+where
+    T: std::fmt::Display + Copy,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (param_env, instance) = self.0.into_parts();
         write!(f, "{}", instance)?;
@@ -922,7 +1094,7 @@ impl std::fmt::Display for PolyInstanceDisplay<'_, '_> {
 }
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_instance = %PolyInstanceDisplay(&poly_instance)))]
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)))]
     pub fn function_context_property<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
@@ -931,6 +1103,9 @@ memoize!(
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceDef::Intrinsic(_) => return Some(Default::default()),
+            ty::InstanceDef::DropGlue(_, Some(ty)) => {
+                cx.drop_adjustment(param_env.and(ty)).ok()?;
+            }
             _ => (),
         }
 
@@ -947,7 +1122,7 @@ memoize!(
             if !generic {
                 info!(
                     "attempt generic version {} {:?} {:?}",
-                    PolyInstanceDisplay(&identity_instance),
+                    PolyDisplay(&identity_instance),
                     identity_instance,
                     poly_instance
                 );
