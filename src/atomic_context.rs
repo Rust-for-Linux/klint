@@ -363,24 +363,35 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
             return;
         }
 
-        let prop = match self.checker.resolve_function_property(
-            self.param_env,
-            self.instance,
-            self.body,
-            terminator,
-        ) {
-            Some(Some(v)) => v,
-            Some(None) => {
-                // Too generic, need to bail out and retry after monomorphization.
-                *state = AdjustmentBounds::unbounded();
-                // Set flag to indicate that the analysis result is not reliable and don't generate errors.
-                self.too_generic.set(true);
-                return;
+        let adjustment = match &terminator.kind {
+            TerminatorKind::Call { .. } => self
+                .checker
+                .resolve_function_property(self.param_env, self.instance, self.body, terminator)
+                .unwrap()
+                .map(|x| x.adjustment)
+                .ok_or(TooGeneric),
+            TerminatorKind::Drop { place, .. } => {
+                let ty = place.ty(self.body, self.checker.tcx).ty;
+                let ty = self.instance.subst_mir_and_normalize_erasing_regions(
+                    self.checker.tcx,
+                    self.param_env,
+                    ty,
+                );
+
+                self.checker.drop_adjustment(self.param_env.and(ty))
             }
-            None => return,
+            _ => return,
         };
 
-        *state = state.offset(prop.adjustment);
+        let Ok(adjustment) = adjustment else {
+            // Too generic, need to bail out and retry after monomorphization.
+            *state = AdjustmentBounds::unbounded();
+            // Set flag to indicate that the analysis result is not reliable and don't generate errors.
+            self.too_generic.set(true);
+            return;
+        };
+
+        *state = state.offset(adjustment);
     }
 
     fn apply_call_return_effect(
