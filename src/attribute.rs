@@ -6,12 +6,12 @@ use rustc_middle::ty::TyCtxt;
 use rustc_span::symbol::Ident;
 use rustc_span::Span;
 
-use crate::atomic_context::PreemptionCountRange;
+use crate::atomic_context::ExpectationRange;
 
 #[derive(Debug, Clone, Copy, Encodable, Decodable)]
 pub struct PreemptionCount {
     pub adjustment: Option<i32>,
-    pub expectation: Option<PreemptionCountRange>,
+    pub expectation: Option<ExpectationRange>,
     pub unchecked: bool,
 }
 
@@ -350,7 +350,7 @@ impl<'tcx> AttrParser<'tcx> {
                         v if v == *crate::symbol::expect => {
                             let (lo, hi);
                             ((lo, hi), cursor) = self.parse_expectation_range(cursor)?;
-                            expectation = Some(PreemptionCountRange { lo, hi });
+                            expectation = Some(ExpectationRange { lo, hi });
                         }
                         v if v == *crate::symbol::unchecked => {
                             unchecked = true;

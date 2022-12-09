@@ -64,12 +64,12 @@ use crate::ctxt::AnalysisCtxt;
 // count and have no expectations on the preemption count.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encodable, Decodable)]
-pub struct PreemptionCountRange {
+pub struct ExpectationRange {
     pub lo: u32,
     pub hi: Option<u32>,
 }
 
-impl PreemptionCountRange {
+impl ExpectationRange {
     fn top() -> Self {
         Self { lo: 0, hi: None }
     }
@@ -90,7 +90,7 @@ impl PreemptionCountRange {
     }
 }
 
-impl MeetSemiLattice for PreemptionCountRange {
+impl MeetSemiLattice for ExpectationRange {
     fn meet(&mut self, other: &Self) -> bool {
         let mut changed = false;
         if self.lo < other.lo {
@@ -116,7 +116,7 @@ impl MeetSemiLattice for PreemptionCountRange {
     }
 }
 
-impl std::fmt::Display for PreemptionCountRange {
+impl std::fmt::Display for ExpectationRange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match (self.lo, self.hi) {
             (lo, None) => write!(f, "{}..", lo),
@@ -127,7 +127,7 @@ impl std::fmt::Display for PreemptionCountRange {
     }
 }
 
-impl std::ops::Add<AdjustmentBounds> for PreemptionCountRange {
+impl std::ops::Add<AdjustmentBounds> for ExpectationRange {
     type Output = Self;
 
     fn add(self, rhs: AdjustmentBounds) -> Self::Output {
@@ -144,7 +144,7 @@ impl std::ops::Add<AdjustmentBounds> for PreemptionCountRange {
     }
 }
 
-impl std::ops::Sub<AdjustmentBounds> for PreemptionCountRange {
+impl std::ops::Sub<AdjustmentBounds> for ExpectationRange {
     type Output = Self;
 
     fn sub(self, rhs: AdjustmentBounds) -> Self::Output {
@@ -291,14 +291,14 @@ pub struct FunctionContextProperty {
     /// and "no expectation" is represented with 0; the upper bound is represented using an `Option<u32>`, with
     /// `None` representing "no expectation". The upper bound is exclusive so `(0, Some(0))` represents an
     /// unsatisfiable condition.
-    expectation: PreemptionCountRange,
+    expectation: ExpectationRange,
     adjustment: i32,
 }
 
 impl Default for FunctionContextProperty {
     fn default() -> Self {
         FunctionContextProperty {
-            expectation: PreemptionCountRange::top(),
+            expectation: ExpectationRange::top(),
             adjustment: 0,
         }
     }
@@ -669,7 +669,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             }
             Some(ResolveResult::TooGeneric) => Some(None),
             Some(ResolveResult::IndirectCall) => Some(Some(FunctionContextProperty {
-                expectation: PreemptionCountRange::top(),
+                expectation: ExpectationRange::top(),
                 adjustment: 0,
             })),
             None => None,
@@ -694,7 +694,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // Allocation functions may sleep.
             "__rust_alloc" | "__rust_alloc_zeroed" | "__rust_realloc" |
             "__rg_alloc" | "__rg_alloc_zeroed" | "__rg_realloc" => FunctionContextProperty {
-                expectation: PreemptionCountRange::single_value(0),
+                expectation: ExpectationRange::single_value(0),
                 adjustment: 0,
             },
 
@@ -702,19 +702,19 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "__rust_dealloc" | "__rg_dealloc" => Default::default(),
 
             "spin_lock" => FunctionContextProperty {
-                expectation: PreemptionCountRange::top(),
+                expectation: ExpectationRange::top(),
                 adjustment: 1,
             },
             "spin_unlock" => FunctionContextProperty {
-                expectation: PreemptionCountRange { lo: 1, hi: None },
+                expectation: ExpectationRange { lo: 1, hi: None },
                 adjustment: -1,
             },
             "__cant_sleep" => FunctionContextProperty {
-                expectation: PreemptionCountRange { lo: 1, hi: None },
+                expectation: ExpectationRange { lo: 1, hi: None },
                 adjustment: 0,
             },
             "__might_sleep" | "msleep" => FunctionContextProperty {
-                expectation: PreemptionCountRange::single_value(0),
+                expectation: ExpectationRange::single_value(0),
                 adjustment: 0,
             },
             _ => {
@@ -722,7 +722,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
                 // Other functions, assume no context change for now.
                 FunctionContextProperty {
-                    expectation: PreemptionCountRange::top(),
+                    expectation: ExpectationRange::top(),
                     adjustment: 0,
                 }
             }
@@ -994,7 +994,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         // Gather expectations.
         if !annotation.unchecked || expectation.is_none() {
-            let mut expectation_infer = PreemptionCountRange::top();
+            let mut expectation_infer = ExpectationRange::top();
             for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
                 if data.is_cleanup {
                     continue;
@@ -1041,7 +1041,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                             diag.emit();
 
                             // For failed inference, revert to the default.
-                            expectation_infer = PreemptionCountRange { lo: 0, hi: None };
+                            expectation_infer = ExpectationRange { lo: 0, hi: None };
 
                             // Stop processing other calls in this function to avoid generating too many errors.
                             break;
