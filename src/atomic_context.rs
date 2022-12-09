@@ -923,7 +923,7 @@ impl std::fmt::Display for PolyInstanceDisplay<'_, '_> {
 
 memoize!(
     #[instrument(skip(cx), fields(poly_instance = %PolyInstanceDisplay(&poly_instance)))]
-    fn function_context_property<'tcx>(
+    pub fn function_context_property<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
     ) -> Option<FunctionContextProperty> {
@@ -1057,7 +1057,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 }
 
 memoize!(
-    fn preemption_count_annotation<'tcx>(
+    pub fn preemption_count_annotation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         def_id: DefId,
     ) -> PreemptionCountAttr {
