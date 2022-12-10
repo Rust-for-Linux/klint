@@ -3,15 +3,19 @@ use rustc_hir::{Constness, LangItem};
 use rustc_index::bit_set::BitSet;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mir::mono::MonoItem;
-use rustc_middle::mir::{BasicBlock, Body, Terminator, TerminatorKind};
+use rustc_middle::mir::{Body, Terminator, TerminatorKind};
 use rustc_middle::ty::{self, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, Ty, TyCtxt};
 use rustc_mir_dataflow::lattice::MeetSemiLattice;
+use rustc_mir_dataflow::Analysis;
 use rustc_mir_dataflow::JoinSemiLattice;
-use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
 
 use crate::attribute::PreemptionCount as PreemptionCountAttr;
 use crate::ctxt::AnalysisCtxt;
+use crate::preempt_count::{
+    dataflow::{AdjustmentBounds, AdjustmentBoundsOrError, AdjustmentComputation},
+    PolyDisplay, TooGeneric,
+};
 
 // A description of how atomic context analysis works.
 //
@@ -160,183 +164,6 @@ impl std::ops::Sub<AdjustmentBounds> for ExpectationRange {
     }
 }
 
-/// Bounds of adjustments.
-///
-/// Note that the semilattice join operation is not a normal range join. If we encounter code like this
-/// ```ignore
-/// while foo() {
-///    enter_atomic();
-/// }
-/// ```
-/// then the bounds will be `0..inf`, and the dataflow analysis will never converge because we are changing
-/// the upper bound one at a time.
-///
-/// To ensure convergence, we does not use `max(a.hi, b.hi)` when joining `a` and `b`. But instead,
-/// if `a.hi` and `b.hi` are different but both positive, we immediately relax the bound to unbounded.
-/// Similar relaxing is performed when `a.lo` and `b.lo` are different but both negative.
-/// We still do normal max/min otherwise, e.g. joining `1..5` and `2..5` gives `1..5`, because usually
-/// the preemption count adjustment is close to zero.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct AdjustmentBounds {
-    /// Lower bound of the adjustment, inclusive.
-    lo: Option<i32>,
-    /// Upper bound of the adjustment, exclusive.
-    hi: Option<i32>,
-}
-
-impl AdjustmentBounds {
-    fn is_empty(&self) -> bool {
-        self.lo == Some(0) && self.hi == Some(0)
-    }
-
-    fn unbounded() -> Self {
-        AdjustmentBounds { lo: None, hi: None }
-    }
-
-    fn offset(&self, offset: i32) -> Self {
-        AdjustmentBounds {
-            lo: self.lo.map(|x| x + offset),
-            hi: self.hi.map(|x| x + offset),
-        }
-    }
-
-    fn is_single_value(&self) -> Option<i32> {
-        match *self {
-            AdjustmentBounds {
-                lo: Some(x),
-                hi: Some(y),
-            } if x + 1 == y => Some(x),
-            _ => None,
-        }
-    }
-}
-
-impl Default for AdjustmentBounds {
-    fn default() -> Self {
-        Self {
-            lo: Some(0),
-            hi: Some(0),
-        }
-    }
-}
-
-impl std::fmt::Debug for AdjustmentBounds {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match (self.lo, self.hi) {
-            (Some(x), Some(y)) if x + 1 == y => write!(f, "{}", x),
-            (Some(x), Some(y)) => write!(f, "{}..{}", x, y),
-            (Some(x), None) => write!(f, "{}..", x),
-            (None, Some(y)) => write!(f, "..{}", y),
-            (None, None) => write!(f, ".."),
-        }
-    }
-}
-
-impl JoinSemiLattice for AdjustmentBounds {
-    fn join(&mut self, other: &Self) -> bool {
-        if other.is_empty() {
-            return false;
-        }
-
-        if self.is_empty() {
-            *self = *other;
-            return true;
-        }
-
-        let mut changed = false;
-        match (self.lo, other.lo) {
-            // Already unbounded, no change needed
-            (None, _) => (),
-            // Same bound, no change needed
-            (Some(a), Some(b)) if a == b => (),
-            // Both bounded, but with different bounds (and both negative). To ensure convergence, relax to unbounded.
-            (Some(a), Some(b)) if a < 0 && b < 0 => {
-                self.lo = None;
-                changed = true;
-            }
-            // Already have lower bound
-            (Some(a), Some(b)) if a < b => (),
-            // Adjust bound
-            _ => {
-                self.lo = other.lo;
-                changed = true;
-            }
-        }
-
-        match (self.hi, other.hi) {
-            // Already unbounded, no change needed
-            (None, _) => (),
-            // Same bound, no change needed
-            (Some(a), Some(b)) if a == b => (),
-            // Both bounded, but with different bounds (and both positive). To ensure convergence, relax to unbounded.
-            (Some(a), Some(b)) if a > 0 && b > 0 => {
-                self.hi = None;
-                changed = true;
-            }
-            // Already have upper bound
-            (Some(a), Some(b)) if a > b => (),
-            // Adjust bound
-            _ => {
-                self.hi = other.hi;
-                changed = true;
-            }
-        }
-        changed
-    }
-}
-
-/// Bounds of adjustments or error.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum AdjustmentBoundsOrError {
-    Bounds(AdjustmentBounds),
-    TooGeneric,
-    Error,
-}
-
-impl AdjustmentBoundsOrError {
-    #[track_caller]
-    fn unwrap(self) -> AdjustmentBounds {
-        match self {
-            AdjustmentBoundsOrError::Bounds(b) => b,
-            _ => unreachable!(),
-        }
-    }
-
-    fn into_result(self) -> Result<AdjustmentBounds, TooGeneric> {
-        match self {
-            AdjustmentBoundsOrError::Bounds(b) => Ok(b),
-            AdjustmentBoundsOrError::TooGeneric => Err(TooGeneric),
-            AdjustmentBoundsOrError::Error => unreachable!(),
-        }
-    }
-}
-
-impl Default for AdjustmentBoundsOrError {
-    fn default() -> Self {
-        Self::Bounds(Default::default())
-    }
-}
-
-impl JoinSemiLattice for AdjustmentBoundsOrError {
-    fn join(&mut self, other: &Self) -> bool {
-        match (*self, other) {
-            (AdjustmentBoundsOrError::Error, _) => false,
-            (_, AdjustmentBoundsOrError::Error) => {
-                *self = AdjustmentBoundsOrError::Error;
-                true
-            }
-            (AdjustmentBoundsOrError::TooGeneric, _) => false,
-            (_, AdjustmentBoundsOrError::TooGeneric) => {
-                *self = AdjustmentBoundsOrError::TooGeneric;
-                true
-            }
-            (AdjustmentBoundsOrError::Bounds(ref mut a), AdjustmentBoundsOrError::Bounds(b)) => {
-                a.join(b)
-            }
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Encodable, Decodable)]
 pub struct FunctionContextProperty {
     /// Range of preemption count that the function expects.
@@ -345,8 +172,8 @@ pub struct FunctionContextProperty {
     /// and "no expectation" is represented with 0; the upper bound is represented using an `Option<u32>`, with
     /// `None` representing "no expectation". The upper bound is exclusive so `(0, Some(0))` represents an
     /// unsatisfiable condition.
-    expectation: ExpectationRange,
-    adjustment: i32,
+    pub expectation: ExpectationRange,
+    pub adjustment: i32,
 }
 
 impl Default for FunctionContextProperty {
@@ -355,33 +182,6 @@ impl Default for FunctionContextProperty {
             expectation: ExpectationRange::top(),
             adjustment: 0,
         }
-    }
-}
-
-struct AdjustmentComputation<'tcx, 'checker> {
-    checker: &'checker AnalysisCtxt<'tcx>,
-    body: &'tcx Body<'tcx>,
-    param_env: ParamEnv<'tcx>,
-    instance: Instance<'tcx>,
-}
-
-impl DebugWithContext<AdjustmentComputation<'_, '_>> for AdjustmentBoundsOrError {}
-
-impl<'tcx> AnalysisDomain<'tcx> for AdjustmentComputation<'tcx, '_> {
-    // The number here indicates the offset in relation to the function's entry point.
-    type Domain = AdjustmentBoundsOrError;
-
-    const NAME: &'static str = "atomic context";
-
-    fn bottom_value(&self, _body: &Body<'tcx>) -> Self::Domain {
-        Default::default()
-    }
-
-    fn initialize_start_block(&self, _body: &Body<'tcx>, state: &mut Self::Domain) {
-        *state = AdjustmentBoundsOrError::Bounds(AdjustmentBounds {
-            lo: Some(0),
-            hi: Some(1),
-        });
     }
 }
 
@@ -396,67 +196,6 @@ fn saturating_add(x: u32, y: i32) -> u32 {
     }
 }
 
-impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
-    fn apply_statement_effect(
-        &self,
-        _state: &mut Self::Domain,
-        _statement: &rustc_middle::mir::Statement<'tcx>,
-        _location: rustc_middle::mir::Location,
-    ) {
-    }
-
-    fn apply_terminator_effect(
-        &self,
-        state: &mut Self::Domain,
-        terminator: &rustc_middle::mir::Terminator<'tcx>,
-        location: rustc_middle::mir::Location,
-    ) {
-        // Skip all unwinding paths.
-        if self.body.basic_blocks[location.block].is_cleanup {
-            return;
-        }
-
-        let AdjustmentBoundsOrError::Bounds(bounds) = state else {
-            return;
-        };
-
-        let adjustment = match &terminator.kind {
-            TerminatorKind::Call { .. } => self
-                .checker
-                .resolve_function_property(self.param_env, self.instance, self.body, terminator)
-                .unwrap()
-                .map(|x| x.adjustment),
-            TerminatorKind::Drop { place, .. } => {
-                let ty = place.ty(self.body, self.checker.tcx).ty;
-                let ty = self.instance.subst_mir_and_normalize_erasing_regions(
-                    self.checker.tcx,
-                    self.param_env,
-                    ty,
-                );
-
-                self.checker.drop_adjustment(self.param_env.and(ty))
-            }
-            _ => return,
-        };
-
-        let Ok(adjustment) = adjustment else {
-            // Too generic, need to bail out and retry after monomorphization.
-            *state = AdjustmentBoundsOrError::TooGeneric;
-            return;
-        };
-
-        *bounds = bounds.offset(adjustment);
-    }
-
-    fn apply_call_return_effect(
-        &self,
-        _state: &mut Self::Domain,
-        _block: BasicBlock,
-        _return_places: rustc_mir_dataflow::CallReturnPlaces<'_, 'tcx>,
-    ) {
-    }
-}
-
 declare_tool_lint! {
     pub klint::ATOMIC_CONTEXT,
     Deny,
@@ -468,175 +207,6 @@ enum ResolveResult<'tcx> {
     TooGeneric,
     IndirectCall,
 }
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Encodable, Decodable)]
-pub struct TooGeneric;
-
-impl<'tcx> AnalysisCtxt<'tcx> {
-    fn drop_adjustment_overflow(
-        &self,
-        poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
-    ) -> Result<i32, TooGeneric> {
-        let mut diag = self.sess.struct_err(format!(
-            "preemption count overflow when trying to compute adjustment of type `{}",
-            PolyDisplay(&poly_ty)
-        ));
-        diag.emit();
-        return Ok(0);
-    }
-}
-
-memoize!(
-    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)))]
-    fn drop_adjustment<'tcx>(
-        cx: &AnalysisCtxt<'tcx>,
-        poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
-    ) -> Result<i32, TooGeneric> {
-        let (param_env, ty) = poly_ty.into_parts();
-
-        // If the type doesn't need drop, then there is trivially no adjustment.
-        if !ty.needs_drop(cx.tcx, param_env) {
-            return Ok(0);
-        }
-
-        match ty.kind() {
-            ty::Closure(_, substs) => {
-                let mut adj = 0i32;
-                for elem_ty in substs.as_closure().upvar_tys() {
-                    let elem_adj = cx.drop_adjustment(param_env.and(elem_ty))?;
-                    let Some(new_adj) = adj.checked_add(elem_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
-                    adj = new_adj;
-                }
-                return Ok(adj);
-            }
-
-            // Generator drops are non-trivial, use the generated drop shims instead.
-            ty::Generator(..) => (),
-
-            ty::Tuple(list) => {
-                let mut adj = 0i32;
-                for elem_ty in list.iter() {
-                    let elem_adj = cx.drop_adjustment(param_env.and(elem_ty))?;
-                    let Some(new_adj) = adj.checked_add(elem_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
-                    adj = new_adj;
-                }
-                return Ok(adj);
-            }
-
-            ty::Adt(def, _) => {
-                // For Adts, we first try to not use any of the substs and just try the most
-                // polymorphic version of the type.
-                let poly_param_env = cx.param_env_reveal_all_normalized(def.did());
-                let poly_substs =
-                    cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
-                let poly_poly_ty = poly_param_env.and(cx.tcx.mk_ty(ty::Adt(*def, poly_substs)));
-                if poly_poly_ty != poly_ty {
-                    if let Ok(adjustment) = cx.drop_adjustment(poly_poly_ty) {
-                        return Ok(adjustment);
-                    }
-                }
-
-                // If that fails, we try to use the substs.
-                // Fallthrough to the MIR drop shim based logic.
-            }
-
-            ty::Dynamic(..) => {
-                cx.sess.warn(format!(
-                    "klint cannot yet check drop of dynamically sized `{}`",
-                    PolyDisplay(&poly_ty)
-                ));
-                return Ok(0);
-            }
-
-            ty::Array(elem_ty, size) => {
-                let size = size.try_eval_usize(cx.tcx, param_env).ok_or(TooGeneric);
-                if size == Ok(0) {
-                    return Ok(0);
-                }
-                let elem_adj = cx.drop_adjustment(param_env.and(*elem_ty))?;
-                if elem_adj == 0 {
-                    return Ok(0);
-                }
-                let Ok(size) = i32::try_from(size?) else { return cx.drop_adjustment_overflow(poly_ty); };
-                let Some(adj) = size.checked_mul(elem_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
-                return Ok(adj);
-            }
-
-            ty::Slice(elem_ty) => {
-                let elem_adj = cx.drop_adjustment(param_env.and(*elem_ty))?;
-                if elem_adj != 0 {
-                    let mut diag = cx.sess.struct_err(
-                        "dropping element of slice causes non-zero preemption count adjustment",
-                    );
-                    diag.note(format!(
-                        "adjustment for dropping `{}` is {}",
-                        elem_ty, elem_adj
-                    ));
-                    diag.note(
-                        "because slice can contain variable number of elements, adjustment \
-                               for dropping the slice cannot be computed statically",
-                    );
-                    // TODO: will be more helpful if we can point to the place of drop
-                    diag.emit();
-                }
-                return Ok(0);
-            }
-
-            _ => return Err(TooGeneric),
-        }
-
-        // Do not call `resolve_drop_in_place` because we need param_env.
-        let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
-        let substs = cx.intern_substs(&[ty.into()]);
-        let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
-            .unwrap()
-            .unwrap();
-
-        assert!(matches!(
-            instance.def,
-            ty::InstanceDef::DropGlue(_, Some(_))
-        ));
-
-        if cx.eval_stack.borrow().contains(&instance) {
-            // Recursion encountered.
-            if param_env.caller_bounds().is_empty() {
-                return Ok(0);
-            } else {
-                // If we are handling generic functions, then defer decision to monomorphization time.
-                return Err(TooGeneric);
-            }
-        }
-
-        cx.eval_stack.borrow_mut().push(instance);
-        let result = cx
-            .compute_property(param_env, instance)
-            .map(|x| x.adjustment);
-
-        // Recursion encountered.
-        if let Some(&recur) = cx.query_cache::<drop_adjustment>().borrow().get(&poly_ty) {
-            match (result, recur) {
-                (Err(_), Err(_)) => (),
-                (Ok(a), Ok(b)) if a == b => (),
-                (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
-                (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
-                (Ok(adj), Ok(_)) => {
-                    let mut diag = cx.sess.struct_span_err(
-                        ty.ty_adt_def()
-                            .map(|x| cx.def_span(x.did()))
-                            .unwrap_or_else(|| cx.def_span(instance.def_id())),
-                        "dropping this type causes recursion but preemption count adjustment is not 0",
-                    );
-                    diag.note(format!("adjustment is inferred to be {}", adj));
-                    diag.note(format!("type being dropped is `{}`", ty));
-                    diag.emit();
-                }
-            }
-        }
-
-        cx.eval_stack.borrow_mut().pop();
-        result
-    }
-);
 
 memoize!(
     #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)))]
@@ -827,7 +397,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         }
     }
 
-    fn resolve_function_property(
+    pub fn resolve_function_property(
         &self,
         param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
@@ -903,11 +473,11 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     fn report_adjustment_infer_error(
         &self,
         instance: Instance<'tcx>,
-        body: &Body<'tcx>,
+        body: &'tcx Body<'tcx>,
         results: &mut rustc_mir_dataflow::ResultsCursor<
             'tcx,
             'tcx,
-            AdjustmentComputation<'tcx, '_>,
+            AdjustmentComputation<'tcx, 'tcx, '_>,
         >,
     ) {
         // First step, see if there are any path that leads to a `return` statement have `Top` directly.
@@ -1238,28 +808,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             expectation: expectation.unwrap(),
             adjustment: adjustment.unwrap(),
         })
-    }
-}
-
-struct PolyDisplay<'a, 'tcx, T>(&'a ParamEnvAnd<'tcx, T>);
-
-impl<T> std::fmt::Display for PolyDisplay<'_, '_, T>
-where
-    T: std::fmt::Display + Copy,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (param_env, instance) = self.0.into_parts();
-        write!(f, "{}", instance)?;
-        if !param_env.caller_bounds().is_empty() {
-            write!(f, " where ")?;
-            for (i, predicate) in param_env.caller_bounds().iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{}", predicate)?;
-            }
-        }
-        Ok(())
     }
 }
 

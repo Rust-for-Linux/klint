@@ -48,6 +48,7 @@ mod mir;
 mod monomorphize_collector;
 mod serde;
 mod symbol;
+mod preempt_count;
 mod util;
 
 rustc_session::declare_tool_lint! {
