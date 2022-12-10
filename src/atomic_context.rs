@@ -95,7 +95,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // Interfacing between libcore and panic runtime
             "rust_begin_unwind" => Default::default(),
             // Basic string operations depended by libcore.
-            "memcmp" => Default::default(),
+            "memcmp" | "strlen" => Default::default(),
 
             // Memory allocations glues depended by liballoc.
             // Allocation functions may sleep.
