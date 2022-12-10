@@ -3,6 +3,7 @@ use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::ty::{Instance, InternalSubsts, ParamEnv, TyCtxt};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
+use rustc_span::Span;
 
 use crate::ctxt::AnalysisCtxt;
 use crate::preempt_count::ExpectationRange;
@@ -153,10 +154,72 @@ impl_lint_pass!(AtomicContext<'_> => [ATOMIC_CONTEXT]);
 
 impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
     fn check_crate(&mut self, _: &LateContext<'tcx>) {
-        // Do this before hand to ensure that errors, if any, are nicely sorted.
-        for &def_id in self.cx.mir_keys(()) {
-            let _ = self.cx.preemption_count_annotation(def_id.to_def_id());
+        use rustc_hir::intravisit as hir_visit;
+        use rustc_hir::*;
+
+        struct FnVisitor<'tcx, F> {
+            tcx: TyCtxt<'tcx>,
+            callback: F,
         }
+
+        impl<'tcx, F> hir_visit::Visitor<'tcx> for FnVisitor<'tcx, F>
+        where
+            F: FnMut(HirId),
+        {
+            type NestedFilter = rustc_middle::hir::nested_filter::All;
+
+            /// Because lints are scoped lexically, we want to walk nested
+            /// items in the context of the outer item, so enable
+            /// deep-walking.
+            fn nested_visit_map(&mut self) -> Self::Map {
+                self.tcx.hir()
+            }
+
+            fn visit_foreign_item(&mut self, i: &'tcx ForeignItem<'tcx>) {
+                match i.kind {
+                    ForeignItemKind::Fn(..) => {
+                        (self.callback)(i.hir_id());
+                    }
+                    _ => (),
+                }
+                hir_visit::walk_foreign_item(self, i);
+            }
+
+            fn visit_trait_item(&mut self, ti: &'tcx TraitItem<'tcx>) {
+                match ti.kind {
+                    TraitItemKind::Fn(_, TraitFn::Required(_)) => {
+                        (self.callback)(ti.hir_id());
+                    }
+                    _ => (),
+                }
+                hir_visit::walk_trait_item(self, ti)
+            }
+
+            fn visit_fn(
+                &mut self,
+                fk: hir_visit::FnKind<'tcx>,
+                fd: &'tcx FnDecl<'tcx>,
+                b: BodyId,
+                _: Span,
+                id: HirId,
+            ) {
+                (self.callback)(id);
+                hir_visit::walk_fn(self, fk, fd, b, id)
+            }
+        }
+
+        // Do this before the lint pass to ensure that errors, if any, are nicely sorted.
+        self.cx.hir().visit_all_item_likes_in_crate(&mut FnVisitor {
+            tcx: self.cx.tcx,
+            callback: |hir_id| {
+                let def_id = self.cx.hir().local_def_id(hir_id).to_def_id();
+                let annotation = self.cx.preemption_count_annotation(def_id);
+                self.cx
+                    .sql_store::<crate::preempt_count::annotation::preemption_count_annotation>(
+                        def_id, annotation,
+                    );
+            },
+        });
     }
 
     fn check_fn(
@@ -209,14 +272,5 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         }
 
         self.cx.encode_mir();
-
-        for &def_id in self.cx.mir_keys(()) {
-            let annotation = self.cx.preemption_count_annotation(def_id.to_def_id());
-            self.cx
-                .sql_store::<crate::preempt_count::annotation::preemption_count_annotation>(
-                    def_id.to_def_id(),
-                    annotation,
-                );
-        }
     }
 }
