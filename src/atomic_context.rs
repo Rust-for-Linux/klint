@@ -417,7 +417,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         }
     }
 
-    fn ffi_property(&self, instance: Instance<'tcx>) -> FunctionContextProperty {
+    pub fn ffi_property(&self, instance: Instance<'tcx>) -> FunctionContextProperty {
         let symbol = self.symbol_name(instance).name;
 
         // Skip LLVM intrinsics
@@ -468,159 +468,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 }
             }
         }
-    }
-
-    fn report_adjustment_infer_error(
-        &self,
-        instance: Instance<'tcx>,
-        body: &'tcx Body<'tcx>,
-        results: &mut rustc_mir_dataflow::ResultsCursor<
-            'tcx,
-            'tcx,
-            AdjustmentComputation<'tcx, 'tcx, '_>,
-        >,
-    ) {
-        // First step, see if there are any path that leads to a `return` statement have `Top` directly.
-        let mut return_bb = None;
-        for (b, data) in rustc_middle::mir::traversal::reachable(body) {
-            match data.terminator().kind {
-                TerminatorKind::Return => (),
-                _ => continue,
-            }
-
-            results.seek_to_block_start(b);
-            // We can unwrap here because if this function is called, we know that no paths to `Return`
-            // can contain `TooGeneric` or `Error` otherwise we would have returned early (in caller).
-            if results.get().unwrap().is_single_value().is_some() {
-                continue;
-            }
-
-            return_bb = Some(b);
-            break;
-        }
-
-        // A catch-all error. MIR building usually should just have one `Return` terminator
-        // so this usually shouldn't happen.
-        let Some(return_bb) = return_bb else {
-            self.tcx
-                .sess
-                .struct_span_err(
-                    self.tcx.def_span(instance.def_id()),
-                    "cannot infer preemption count adjustment of this function",
-                )
-                .emit();
-
-            return;
-        };
-
-        // Find the deepest single-value block in the dominator tree.
-        let mut first_problematic_block = return_bb;
-        let dominators = body.basic_blocks.dominators();
-        loop {
-            let b = dominators.immediate_dominator(first_problematic_block);
-            if b == first_problematic_block {
-                // Shouldn't actually happen because the entry block should always have a single value.
-                break;
-            }
-
-            results.seek_to_block_start(b);
-            if results.get().unwrap().is_single_value().is_some() {
-                break;
-            }
-            first_problematic_block = b;
-        }
-
-        // For this problematic block, try use a span that closest to the beginning of it.
-        let span = body.basic_blocks[first_problematic_block]
-            .statements
-            .first()
-            .map(|x| x.source_info.span)
-            .unwrap_or_else(|| {
-                body.basic_blocks[first_problematic_block]
-                    .terminator()
-                    .source_info
-                    .span
-            });
-
-        let mut diag = self.tcx.sess.struct_span_err(
-            span,
-            "cannot infer preemption count adjustment at this point",
-        );
-
-        let mut count = 0;
-        for mut prev_block in body.basic_blocks.predecessors()[first_problematic_block]
-            .iter()
-            .copied()
-        {
-            results.seek_to_block_end(prev_block);
-            let mut end_adjustment = results.get().unwrap();
-            results.seek_to_block_start(prev_block);
-            let mut start_adjustment = results.get().unwrap();
-
-            // If this block has made no changes to the adjustment, backtrack to the predecessors block
-            // that made the change.
-            while start_adjustment == end_adjustment {
-                let pred = &body.basic_blocks.predecessors()[prev_block];
-
-                // Don't continue backtracking if there are multiple predecessors.
-                if pred.len() != 1 {
-                    break;
-                }
-                let b = pred[0];
-
-                // Don't continue backtracking if the predecessor block has multiple successors.
-                let terminator = body.basic_blocks[b].terminator();
-                let successor_count = terminator.successors().count();
-                let has_unwind = terminator.unwind().map(|x| x.is_some()).unwrap_or(false);
-                let normal_successor = successor_count - has_unwind as usize;
-                if normal_successor != 1 {
-                    break;
-                }
-
-                prev_block = b;
-                results.seek_to_block_end(prev_block);
-                end_adjustment = results.get().unwrap();
-                results.seek_to_block_start(prev_block);
-                start_adjustment = results.get().unwrap();
-            }
-
-            let terminator = body.basic_blocks[prev_block].terminator();
-            let span = match terminator.kind {
-                TerminatorKind::Goto { .. } => {
-                    // Goto terminator of `if .. { .. } else { .. }` has span on the entire expression,
-                    // which is not very useful.
-                    // In this case we use the last statement's span instead.
-                    body.basic_blocks[prev_block]
-                        .statements
-                        .last()
-                        .map(|x| x.source_info)
-                        .unwrap_or_else(|| terminator.source_info)
-                        .span
-                }
-                _ => terminator.source_info.span,
-            };
-
-            let mut msg = match start_adjustment.is_single_value() {
-                None => {
-                    format!("preemption count adjustment is changed in the previous iteration of the loop")
-                }
-                Some(_) => {
-                    format!(
-                        "preemption count adjustment is {:?} after this",
-                        end_adjustment
-                    )
-                }
-            };
-
-            match count {
-                0 => (),
-                1 => msg = format!("while {}", msg),
-                _ => msg = format!("and {}", msg),
-            }
-            count += 1;
-            diag.span_note(span, msg);
-        }
-        diag.emit();
     }
 
     #[instrument(skip_all, fields(instance=%instance), ret)]
@@ -699,7 +546,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             } else if let Some(v) = adjustment_infer.is_single_value() {
                 v
             } else {
-                self.report_adjustment_infer_error(instance, mir, &mut analysis_result);
                 0
             };
 
@@ -955,72 +801,6 @@ impl<'tcx> AtomicContext<'tcx> {
 
 impl_lint_pass!(AtomicContext<'_> => [ATOMIC_CONTEXT]);
 
-impl<'tcx> AnalysisCtxt<'tcx> {
-    fn preemption_count_annotation_fallback(&self, def_id: DefId) -> PreemptionCountAttr {
-        match self.crate_name(def_id.krate).as_str() {
-            // Happens in a test environment where build-std is not enabled.
-            "core" | "alloc" | "std" => (),
-            _ => {
-                warn!(
-                    "Unable to retrieve preemption count annotation of non-local function {:?}",
-                    def_id
-                );
-            }
-        }
-        Default::default()
-    }
-}
-
-memoize!(
-    pub fn preemption_count_annotation<'tcx>(
-        cx: &AnalysisCtxt<'tcx>,
-        def_id: DefId,
-    ) -> PreemptionCountAttr {
-        let Some(local_def_id) = def_id.as_local() else {
-            if let Some(v) = cx.sql_load::<preemption_count_annotation>(def_id) {
-                return v;
-            }
-            return cx.preemption_count_annotation_fallback(def_id);
-        };
-
-        let hir_id = cx.hir().local_def_id_to_hir_id(local_def_id);
-        for attr in cx.klint_attributes(hir_id).iter() {
-            match attr {
-                crate::attribute::KlintAttribute::PreemptionCount(pc) => {
-                    return *pc;
-                }
-                _ => (),
-            }
-        }
-
-        Default::default()
-    }
-);
-
-impl crate::ctxt::PersistentQuery for preemption_count_annotation {
-    type LocalKey<'tcx> = DefIndex;
-
-    fn into_crate_and_local<'tcx>(key: Self::Key<'tcx>) -> (CrateNum, Self::LocalKey<'tcx>) {
-        (key.krate, key.index)
-    }
-}
-
-memoize!(
-    pub fn should_report_preempt_count<'tcx>(cx: &AnalysisCtxt<'tcx>, def_id: DefId) -> bool {
-        let Some(local_def_id) = def_id.as_local() else { return false };
-
-        let hir_id = cx.hir().local_def_id_to_hir_id(local_def_id);
-        for attr in cx.klint_attributes(hir_id).iter() {
-            match attr {
-                crate::attribute::KlintAttribute::ReportPreeptionCount => return true,
-                _ => (),
-            }
-        }
-
-        false
-    }
-);
-
 impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
     fn check_crate(&mut self, _: &LateContext<'tcx>) {
         // Do this before hand to ensure that errors, if any, are nicely sorted.
@@ -1078,7 +858,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         for &def_id in self.cx.mir_keys(()) {
             let annotation = self.cx.preemption_count_annotation(def_id.to_def_id());
             self.cx
-                .sql_store::<preemption_count_annotation>(def_id.to_def_id(), annotation);
+                .sql_store::<crate::preempt_count::annotation::preemption_count_annotation>(def_id.to_def_id(), annotation);
         }
     }
 }

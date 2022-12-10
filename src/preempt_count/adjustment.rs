@@ -1,4 +1,5 @@
-use rustc_hir::LangItem;
+use rustc_hir::def_id::CrateNum;
+use rustc_hir::{Constness, LangItem};
 use rustc_index::bit_set::BitSet;
 use rustc_middle::mir::{Body, TerminatorKind};
 use rustc_middle::ty::{self, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, Ty};
@@ -22,7 +23,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         return Ok(0);
     }
 
-    fn report_preempt_count_adjustment_infer_error<'mir>(
+    fn report_adjustment_infer_error<'mir>(
         &self,
         instance: Instance<'tcx>,
         body: &'mir Body<'tcx>,
@@ -175,7 +176,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         diag.emit();
     }
 
-    pub fn infer_preempt_count_adjustment(
+    pub fn infer_adjustment(
         &self,
         param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
@@ -219,7 +220,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         } else if let Some(v) = adjustment.is_single_value() {
             v
         } else {
-            self.report_preempt_count_adjustment_infer_error(instance, body, &mut analysis_result);
+            self.report_adjustment_infer_error(instance, body, &mut analysis_result);
             0
         };
 
@@ -351,7 +352,7 @@ memoize!(
         cx.eval_stack.borrow_mut().push(instance);
 
         let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
-        let result = cx.infer_preempt_count_adjustment(param_env, instance, &mir);
+        let result = cx.infer_adjustment(param_env, instance, &mir);
 
         // Recursion encountered.
         if let Some(&recur) = cx.query_cache::<drop_adjustment>().borrow().get(&poly_ty) {
@@ -378,3 +379,190 @@ memoize!(
         result
     }
 );
+
+memoize!(
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)))]
+    pub fn instance_adjustment<'tcx>(
+        cx: &AnalysisCtxt<'tcx>,
+        poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
+    ) -> Result<i32, TooGeneric> {
+        let (param_env, instance) = poly_instance.into_parts();
+        match instance.def {
+            // No Rust built-in intrinsics will mess with preemption count.
+            ty::InstanceDef::Intrinsic(_) => return Ok(0),
+            // No drop glue, then it definitely won't mess with preemption count.
+            ty::InstanceDef::DropGlue(_, None) => return Ok(0),
+            ty::InstanceDef::DropGlue(_, Some(ty)) => return cx.drop_adjustment(param_env.and(ty)),
+            _ => (),
+        }
+
+        let poly_param_env = cx
+            .param_env_reveal_all_normalized(instance.def_id())
+            .with_constness(Constness::NotConst);
+        let poly_substs =
+            cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
+        let mut generic = false;
+        if !cx.trait_of_item(instance.def_id()).is_some() {
+            let poly_poly_instance =
+                poly_param_env.and(Instance::new(instance.def_id(), poly_substs));
+            generic = poly_poly_instance == poly_instance;
+            if !generic {
+                if let Ok(v) = cx.instance_adjustment(poly_poly_instance) {
+                    return Ok(v);
+                }
+            }
+        }
+
+        if cx.is_foreign_item(instance.def_id()) {
+            return Ok(cx.ffi_property(instance).adjustment);
+        }
+
+        if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
+            if let Some(p) = cx.sql_load::<instance_adjustment>(poly_instance) {
+                return p;
+            }
+
+            warn!(
+                "Unable to compute adjustment of non-local function {:?}",
+                instance
+            );
+            return Ok(0);
+        }
+
+        // Use annotation if available.
+        let annotation = cx.preemption_count_annotation(instance.def_id());
+        if let Some(adj) = annotation.adjustment {
+            info!("adjustment {} from annotation", adj);
+        }
+
+        if cx.eval_stack.borrow().contains(&instance) {
+            // Recursion encountered.
+            if param_env.caller_bounds().is_empty() {
+                return Ok(annotation.adjustment.unwrap_or(0));
+            } else {
+                // If we are handling generic functions, then defer decision to monomorphization time.
+                return Err(TooGeneric);
+            }
+        }
+
+        cx.eval_stack.borrow_mut().push(instance);
+
+        let mir = cx.analysis_instance_mir(instance.def);
+        let result = if !annotation.unchecked || annotation.adjustment.is_none() {
+            let infer_result = cx.infer_adjustment(param_env, instance, mir);
+            if let Ok(adjustment_infer) = infer_result {
+                // Check if the inferred adjustment matches the annotation.
+                if let Some(adjustment) = annotation.adjustment {
+                    if adjustment != adjustment_infer {
+                        let mut diag = cx.sess.struct_span_err(
+                            cx.def_span(instance.def_id()),
+                            format!("function annotated to have preemption count adjustment of {adjustment}"),
+                        );
+                        diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
+                        diag.emit();
+                    }
+                    Ok(adjustment)
+                } else {
+                    Ok(adjustment_infer)
+                }
+            } else {
+                infer_result
+            }
+        } else {
+            Ok(annotation.adjustment.unwrap())
+        };
+
+        // Addition check for FFI functions.
+        // Verify that the inferred result is compatible with the FFI list.
+        if let Ok(adj) = result && cx
+            .codegen_fn_attrs(instance.def_id())
+            .contains_extern_indicator()
+        {
+            // Verify that the inferred result is compatible with the FFI list.
+            let ffi_property = cx.ffi_property(instance);
+
+            if adj != ffi_property.adjustment {
+                let mut diag = cx.tcx.sess.struct_span_err(
+                    cx.def_span(instance.def_id()),
+                    format!(
+                        "extern function `{}` must have preemption count adjustment {}",
+                        cx.def_path_str(instance.def_id()),
+                        ffi_property.adjustment,
+                    ),
+                );
+                diag.note(format!(
+                    "preemption count adjustment inferred is {adj}",
+                ));
+                diag.emit();
+            }
+        }
+
+        // Recursion encountered.
+        if let Some(&recur) = cx
+            .query_cache::<instance_adjustment>()
+            .borrow()
+            .get(&poly_instance)
+        {
+            match (result, recur) {
+                (Err(_), Err(_)) => (),
+                (Ok(a), Ok(b)) if a == b => (),
+                (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
+                (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
+                (Ok(adj), Ok(_)) => {
+                    let mut diag = cx.sess.struct_span_err(
+                        cx.def_span(instance.def_id()),
+                        format!(
+                            "this function is recursive but preemption count adjustment is not {}",
+                            annotation.adjustment.unwrap_or(0)
+                        ),
+                    );
+                    diag.note(format!("adjustment is inferred to be {}", adj));
+                    diag.note(format!(
+                        "instance being checked is `{}`",
+                        PolyDisplay(&poly_instance)
+                    ));
+                    if let Some(adj) = annotation.adjustment {
+                        diag.note(format!(
+                            "the function is annotated to have adjustment of {adj}",
+                        ));
+                    } else {
+                        diag.help(format!(
+                            "try annotate the function with `#[klint::preempt_count(adjust = {adj})]`"
+                        ));
+                    }
+                    diag.emit();
+                }
+            }
+        }
+
+        if instance.def_id().is_local() && (generic || param_env.caller_bounds().is_empty()) {
+            cx.sql_store::<instance_adjustment>(poly_instance, result);
+        }
+
+        if cx.should_report_preempt_count(instance.def_id()) {
+            let mut diag = cx.sess.diagnostic().struct_note_without_error(format!(
+                "reporting preemption count for instance `{}`",
+                PolyDisplay(&poly_instance)
+            ));
+            diag.set_span(cx.def_span(instance.def_id()));
+            if let Ok(property) = result {
+                diag.note(format!("adjustment is inferred to be {}", property));
+            } else {
+                diag.note("inference failed because this function is too generic");
+            }
+            diag.emit();
+        }
+
+        cx.eval_stack.borrow_mut().pop();
+        result
+    }
+);
+
+impl crate::ctxt::PersistentQuery for instance_adjustment {
+    type LocalKey<'tcx> = Instance<'tcx>;
+
+    fn into_crate_and_local<'tcx>(key: Self::Key<'tcx>) -> (CrateNum, Self::LocalKey<'tcx>) {
+        let instance = key.value;
+        (instance.def_id().krate, instance)
+    }
+}

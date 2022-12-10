@@ -1,6 +1,7 @@
 use rustc_middle::ty::ParamEnvAnd;
 
-mod adjustment;
+pub mod adjustment;
+pub mod annotation;
 pub mod dataflow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encodable, Decodable)]

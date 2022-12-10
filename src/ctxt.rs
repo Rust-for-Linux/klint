@@ -271,7 +271,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             eval_stack: Default::default(),
             query_cache: Default::default(),
         };
-        ret.sql_create_table::<crate::atomic_context::preemption_count_annotation>();
+        ret.sql_create_table::<crate::preempt_count::annotation::preemption_count_annotation>();
+        ret.sql_create_table::<crate::preempt_count::adjustment::instance_adjustment>();
         ret.sql_create_table::<crate::atomic_context::instance_preempt_count_property>();
         ret.sql_create_table::<crate::mir::analysis_mir>();
         ret

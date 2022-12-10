@@ -1,5 +1,5 @@
 use rustc_middle::mir::{BasicBlock, Body, TerminatorKind};
-use rustc_middle::ty::{Instance, ParamEnv};
+use rustc_middle::ty::{self, Instance, ParamEnv};
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
 
@@ -235,11 +235,30 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
         };
 
         let adjustment = match &terminator.kind {
-            TerminatorKind::Call { .. } => self
-                .checker
-                .resolve_function_property(self.param_env, self.instance, self.body, terminator)
-                .unwrap()
-                .map(|x| x.adjustment),
+            TerminatorKind::Call { func, .. } => {
+                let callee_ty = func.ty(self.body, self.checker.tcx);
+                let callee_ty = self.instance.subst_mir_and_normalize_erasing_regions(
+                    self.checker.tcx,
+                    self.param_env,
+                    callee_ty,
+                );
+                if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
+                    match ty::Instance::resolve(self.checker.tcx, self.param_env, def_id, substs)
+                        .unwrap()
+                    {
+                        Some(instance) => self
+                            .checker
+                            .instance_adjustment(self.param_env.and(instance)),
+                        None => Err(TooGeneric),
+                    }
+                } else {
+                    self.checker.sess.span_warn(
+                        terminator.source_info.span,
+                        "klint cannot yet check indirect function calls",
+                    );
+                    Ok(0)
+                }
+            }
             TerminatorKind::Drop { place, .. } => {
                 let ty = place.ty(self.body, self.checker.tcx).ty;
                 let ty = self.instance.subst_mir_and_normalize_erasing_regions(
