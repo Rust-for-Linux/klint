@@ -393,6 +393,13 @@ memoize!(
             // Empty drop glue, then it definitely won't mess with preemption count.
             ty::InstanceDef::DropGlue(_, None) => return Ok(0),
             ty::InstanceDef::DropGlue(_, Some(ty)) => return cx.drop_adjustment(param_env.and(ty)),
+            ty::InstanceDef::Virtual(..) => {
+                cx.sess.span_warn(
+                    cx.def_span(instance.def_id()),
+                    "klint cannot yet check indirect function calls",
+                );
+                return Ok(0);
+            }
             _ => (),
         }
 

@@ -273,6 +273,13 @@ memoize!(
             ty::InstanceDef::DropGlue(_, Some(ty)) => {
                 return cx.drop_expectation(param_env.and(ty))
             }
+            ty::InstanceDef::Virtual(..) => {
+                cx.sess.span_warn(
+                    cx.def_span(instance.def_id()),
+                    "klint cannot yet check indirect function calls",
+                );
+                return Ok(ExpectationRange::top());
+            }
             _ => (),
         }
 
