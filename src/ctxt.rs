@@ -82,12 +82,12 @@ macro_rules! memoize {
                 {
                     let guard = cache.borrow();
                     if let Some(val) = guard.get(&pack) {
-                        return *val;
+                        return <$ret>::clone(val);
                     }
                 }
                 let val = $name(self, $($key)*);
                 let mut guard = cache.borrow_mut();
-                guard.insert(pack, val);
+                guard.insert(pack, <$ret>::clone(&val));
                 val
             }
         }

@@ -1311,6 +1311,25 @@ memoize!(
             cx.sql_store::<instance_preempt_count_property>(poly_instance, result);
         }
 
+        if cx.should_report_preempt_count(instance.def_id()) {
+            let mut diag = cx.sess.struct_span_warn(
+                cx.def_span(instance.def_id()),
+                format!(
+                    "reporting preemption count for instance `{}`",
+                    PolyDisplay(&poly_instance)
+                ),
+            );
+            if let Ok(property) = result {
+                diag.note(format!(
+                    "adjustment is inferred to be {} and expectation is inferred to be {}",
+                    property.adjustment, property.expectation
+                ));
+            } else {
+                diag.note("inference failed because this function is too generic");
+            }
+            diag.emit();
+        }
+
         cx.eval_stack.borrow_mut().pop();
         result
     }
@@ -1367,14 +1386,13 @@ memoize!(
             return cx.preemption_count_annotation_fallback(def_id);
         };
 
-        let hir = cx.hir();
-        let hir_id = hir.local_def_id_to_hir_id(local_def_id);
-        for attr in hir.attrs(hir_id) {
-            let Some(attr) = crate::attribute::parse_klint_attribute(cx.tcx, hir_id, attr) else { continue };
+        let hir_id = cx.hir().local_def_id_to_hir_id(local_def_id);
+        for attr in cx.klint_attributes(hir_id).iter() {
             match attr {
                 crate::attribute::KlintAttribute::PreemptionCount(pc) => {
-                    return pc;
+                    return *pc;
                 }
+                _ => (),
             }
         }
 
@@ -1389,6 +1407,22 @@ impl crate::ctxt::PersistentQuery for preemption_count_annotation {
         (key.krate, key.index)
     }
 }
+
+memoize!(
+    pub fn should_report_preempt_count<'tcx>(cx: &AnalysisCtxt<'tcx>, def_id: DefId) -> bool {
+        let Some(local_def_id) = def_id.as_local() else { return false };
+
+        let hir_id = cx.hir().local_def_id_to_hir_id(local_def_id);
+        for attr in cx.klint_attributes(hir_id).iter() {
+            match attr {
+                crate::attribute::KlintAttribute::ReportPreeptionCount => return true,
+                _ => (),
+            }
+        }
+
+        false
+    }
+);
 
 impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
     fn check_crate(&mut self, _: &LateContext<'tcx>) {

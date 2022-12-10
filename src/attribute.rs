@@ -1,5 +1,6 @@
 use rustc_ast::tokenstream::{self, TokenTree};
 use rustc_ast::{ast, token};
+use rustc_data_structures::sync::Lrc;
 use rustc_errors::{DiagnosticBuilder, ErrorGuaranteed};
 use rustc_hir::HirId;
 use rustc_middle::ty::TyCtxt;
@@ -28,6 +29,7 @@ impl Default for PreemptionCount {
 #[derive(Debug)]
 pub enum KlintAttribute {
     PreemptionCount(PreemptionCount),
+    ReportPreeptionCount,
 }
 
 struct Cursor<'a> {
@@ -396,6 +398,9 @@ impl<'tcx> AttrParser<'tcx> {
             v if v == *crate::symbol::preempt_count => Some(KlintAttribute::PreemptionCount(
                 self.parse_preempt_count(attr, item).ok()?,
             )),
+            v if v == *crate::symbol::report_preempt_count => {
+                Some(KlintAttribute::ReportPreeptionCount)
+            }
             _ => {
                 self.tcx.struct_span_lint_hir(
                     crate::INCORRECT_ATTRIBUTE,
@@ -417,3 +422,17 @@ pub fn parse_klint_attribute(
 ) -> Option<KlintAttribute> {
     AttrParser { tcx, hir_id }.parse(attr)
 }
+
+memoize!(
+    pub fn klint_attributes<'tcx>(
+        cx: &AnalysisCtxt<'tcx>,
+        hir_id: HirId,
+    ) -> Lrc<Vec<KlintAttribute>> {
+        let mut v = Vec::new();
+        for attr in cx.hir().attrs(hir_id) {
+            let Some(attr) = crate::attribute::parse_klint_attribute(cx.tcx, hir_id, attr) else { continue };
+            v.push(attr);
+        }
+        Lrc::new(v)
+    }
+);

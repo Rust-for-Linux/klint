@@ -12,6 +12,7 @@ macro_rules! def {
 def! {
     klint,
     preempt_count,
+    report_preempt_count,
     adjust,
     expect,
     unchecked,
