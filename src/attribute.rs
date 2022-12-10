@@ -7,7 +7,7 @@ use rustc_middle::ty::TyCtxt;
 use rustc_span::symbol::Ident;
 use rustc_span::Span;
 
-use crate::atomic_context::ExpectationRange;
+use crate::preempt_count::ExpectationRange;
 
 #[derive(Debug, Clone, Copy, Encodable, Decodable)]
 pub struct PreemptionCount {

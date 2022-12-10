@@ -273,7 +273,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         };
         ret.sql_create_table::<crate::preempt_count::annotation::preemption_count_annotation>();
         ret.sql_create_table::<crate::preempt_count::adjustment::instance_adjustment>();
-        ret.sql_create_table::<crate::atomic_context::instance_preempt_count_property>();
+        ret.sql_create_table::<crate::preempt_count::expectation::instance_expectation>();
         ret.sql_create_table::<crate::mir::analysis_mir>();
         ret
     }

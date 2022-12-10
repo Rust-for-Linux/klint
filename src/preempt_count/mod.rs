@@ -1,8 +1,12 @@
-use rustc_middle::ty::ParamEnvAnd;
-
 pub mod adjustment;
 pub mod annotation;
 pub mod dataflow;
+pub mod expectation;
+
+use rustc_middle::ty::ParamEnvAnd;
+use rustc_mir_dataflow::lattice::MeetSemiLattice;
+
+use self::dataflow::AdjustmentBounds;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encodable, Decodable)]
 pub struct TooGeneric;
@@ -26,5 +30,115 @@ where
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Encodable, Decodable)]
+pub struct ExpectationRange {
+    pub lo: u32,
+    pub hi: Option<u32>,
+}
+
+impl ExpectationRange {
+    pub fn top() -> Self {
+        Self { lo: 0, hi: None }
+    }
+
+    pub fn single_value(v: u32) -> Self {
+        Self {
+            lo: v,
+            hi: Some(v + 1),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        if let Some(hi) = self.hi {
+            self.lo >= hi
+        } else {
+            false
+        }
+    }
+}
+
+impl MeetSemiLattice for ExpectationRange {
+    fn meet(&mut self, other: &Self) -> bool {
+        let mut changed = false;
+        if self.lo < other.lo {
+            self.lo = other.lo;
+            changed = true;
+        }
+
+        match (self.hi, other.hi) {
+            (_, None) => (),
+            (None, Some(_)) => {
+                self.hi = other.hi;
+                changed = true;
+            }
+            (Some(a), Some(b)) => {
+                if a > b {
+                    self.hi = Some(b);
+                    changed = true;
+                }
+            }
+        }
+
+        changed
+    }
+}
+
+impl std::fmt::Display for ExpectationRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.lo, self.hi) {
+            (lo, None) => write!(f, "{}..", lo),
+            (lo, Some(hi)) if lo >= hi => write!(f, "unsatisfiable"),
+            (lo, Some(hi)) if lo + 1 == hi => write!(f, "{lo}"),
+            (lo, Some(hi)) => write!(f, "{}..{}", lo, hi),
+        }
+    }
+}
+
+fn saturating_add(x: u32, y: i32) -> u32 {
+    let (res, overflow) = x.overflowing_add(y as u32);
+    if overflow == (y < 0) {
+        res
+    } else if overflow {
+        u32::MAX
+    } else {
+        0
+    }
+}
+
+impl std::ops::Add<AdjustmentBounds> for ExpectationRange {
+    type Output = Self;
+
+    fn add(self, rhs: AdjustmentBounds) -> Self::Output {
+        Self {
+            lo: match rhs.lo {
+                None => 0,
+                Some(bound) => saturating_add(self.lo, bound),
+            },
+            hi: self
+                .hi
+                .zip(rhs.hi)
+                .map(|(hi, bound)| saturating_add(hi, bound - 1)),
+        }
+    }
+}
+
+impl std::ops::Sub<AdjustmentBounds> for ExpectationRange {
+    type Output = Self;
+
+    fn sub(self, rhs: AdjustmentBounds) -> Self::Output {
+        Self {
+            lo: match rhs.lo {
+                None => 0,
+                Some(bound) => saturating_add(self.lo, -bound),
+            },
+            hi: match (self.hi, rhs.hi) {
+                (None, _) => None,
+                (_, None) => Some(0),
+                (Some(hi), Some(bound)) => Some(saturating_add(hi, 1 - bound)),
+            },
+        }
     }
 }
