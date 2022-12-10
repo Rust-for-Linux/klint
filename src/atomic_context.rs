@@ -494,15 +494,15 @@ memoize!(
             }
 
             ty::Array(elem_ty, size) => {
-                let size = size.try_eval_usize(cx.tcx, param_env).ok_or(TooGeneric)?;
-                if size == 0 {
+                let size = size.try_eval_usize(cx.tcx, param_env).ok_or(TooGeneric);
+                if size == Ok(0) {
                     return Ok(0);
                 }
                 let elem_adj = cx.drop_adjustment(param_env.and(*elem_ty))?;
                 if elem_adj == 0 {
                     return Ok(0);
                 }
-                let Ok(size) = i32::try_from(size) else { return cx.drop_adjustment_overflow(poly_ty); };
+                let Ok(size) = i32::try_from(size?) else { return cx.drop_adjustment_overflow(poly_ty); };
                 let Some(adj) = size.checked_mul(elem_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
                 return Ok(adj);
             }
@@ -530,12 +530,12 @@ memoize!(
             _ => return Err(TooGeneric),
         }
 
-        // Do not call `resolve_drop_in_place` directly as it does double unwrap.
+        // Do not call `resolve_drop_in_place` because we need param_env.
         let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
         let substs = cx.intern_substs(&[ty.into()]);
         let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
             .unwrap()
-            .ok_or(TooGeneric)?;
+            .unwrap();
 
         assert!(matches!(
             instance.def,
@@ -577,6 +577,135 @@ memoize!(
                 }
             }
         }
+
+        cx.eval_stack.borrow_mut().pop();
+        result
+    }
+);
+
+memoize!(
+    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)))]
+    fn drop_preempt_count_expectation<'tcx>(
+        cx: &AnalysisCtxt<'tcx>,
+        poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
+    ) -> Result<ExpectationRange, TooGeneric> {
+        let (param_env, ty) = poly_ty.into_parts();
+
+        // If the type doesn't need drop, then there is trivially no expectation.
+        if !ty.needs_drop(cx.tcx, param_env) {
+            return Ok(ExpectationRange::top());
+        }
+
+        match ty.kind() {
+            ty::Closure(_, substs) => (),
+
+            // Generator drops are non-trivial, use the generated drop shims instead.
+            ty::Generator(..) => (),
+
+            ty::Tuple(list) => (),
+
+            ty::Adt(def, _) => {
+                // For Adts, we first try to not use any of the substs and just try the most
+                // polymorphic version of the type.
+                let poly_param_env = cx.param_env_reveal_all_normalized(def.did());
+                let poly_substs =
+                    cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
+                let poly_poly_ty = poly_param_env.and(cx.tcx.mk_ty(ty::Adt(*def, poly_substs)));
+                if poly_poly_ty != poly_ty {
+                    if let Ok(expectation) = cx.drop_preempt_count_expectation(poly_poly_ty) {
+                        return Ok(expectation);
+                    }
+                }
+
+                // If that fails, we try to use the substs.
+                // Fallthrough to the MIR drop shim based logic.
+            }
+
+            ty::Dynamic(..) => {
+                cx.sess.warn(format!(
+                    "klint cannot yet check drop of dynamically sized `{}`",
+                    PolyDisplay(&poly_ty)
+                ));
+                return Ok(ExpectationRange::top());
+            }
+
+            ty::Array(elem_ty, size) => {
+                let size = size.try_eval_usize(cx.tcx, param_env).ok_or(TooGeneric);
+                if size == Ok(0) {
+                    return Ok(ExpectationRange::top());
+                }
+
+                let param_and_elem_ty = param_env.and(*elem_ty);
+                let elem_adj = cx.drop_adjustment(param_and_elem_ty)?;
+                let elem_exp = cx.drop_preempt_count_expectation(param_and_elem_ty)?;
+                if elem_adj == 0 {
+                    return Ok(elem_exp);
+                }
+
+                // TODO: deal with this case without using the MIR based logic.
+            }
+
+            ty::Slice(elem_ty) => {
+                // We can assume adjustment here is 0 otherwise the adjustment calculation
+                // logic would have complained.
+                return cx.drop_preempt_count_expectation(param_env.and(*elem_ty));
+            }
+
+            _ => return Err(TooGeneric),
+        }
+
+        // Do not call `resolve_drop_in_place` because we need param_env.
+        let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
+        let substs = cx.intern_substs(&[ty.into()]);
+        let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            instance.def,
+            ty::InstanceDef::DropGlue(_, Some(_))
+        ));
+
+        if cx.eval_stack.borrow().contains(&instance) {
+            // Recursion encountered.
+            if param_env.caller_bounds().is_empty() {
+                return Ok(ExpectationRange::top());
+            } else {
+                // If we are handling generic functions, then defer decision to monomorphization time.
+                return Err(TooGeneric);
+            }
+        }
+
+        cx.eval_stack.borrow_mut().push(instance);
+        let result = cx
+            .compute_property(param_env, instance)
+            .map(|x| x.expectation);
+
+        // Recursion encountered.
+        if let Some(&recur) = cx
+            .query_cache::<drop_preempt_count_expectation>()
+            .borrow()
+            .get(&poly_ty)
+        {
+            match (result, recur) {
+                (Err(_), Err(_)) => (),
+                (Ok(a), Ok(b)) if a == b => (),
+                (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
+                (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
+                (Ok(exp), Ok(_)) => {
+                    let mut diag = cx.sess.struct_span_err(
+                        ty.ty_adt_def()
+                            .map(|x| cx.def_span(x.did()))
+                            .unwrap_or_else(|| cx.def_span(instance.def_id())),
+                        "dropping this type causes recursion while also has preemption count expectation",
+                    );
+                    diag.note(format!("expectation inferred is {}", exp));
+                    diag.note(format!("type being dropped is `{}`", ty));
+                    diag.emit();
+                }
+            }
+        }
+
         cx.eval_stack.borrow_mut().pop();
         result
     }
@@ -636,14 +765,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 self.tcx.sess.span_warn(
                     terminator.source_info.span,
                     "klint cannot yet check indirect function calls",
-                );
-                Some(ResolveResult::IndirectCall)
-            }
-            ty::InstanceDef::DropGlue(_, Some(v)) if !v.is_sized(self.tcx, param_env) => {
-                // Drop of DST will recreate a self-recursive
-                self.tcx.sess.span_warn(
-                    terminator.source_info.span,
-                    format!("klint cannot yet check DST drop (type = {v})"),
                 );
                 Some(ResolveResult::IndirectCall)
             }
@@ -1102,7 +1223,12 @@ memoize!(
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceDef::Intrinsic(_) => return Ok(Default::default()),
             ty::InstanceDef::DropGlue(_, Some(ty)) => {
-                cx.drop_adjustment(param_env.and(ty))?;
+                let adj = cx.drop_adjustment(param_env.and(ty))?;
+                let exp = cx.drop_preempt_count_expectation(param_env.and(ty))?;
+                return Ok(FunctionContextProperty {
+                    expectation: exp,
+                    adjustment: adj,
+                });
             }
             _ => (),
         }
