@@ -1312,13 +1312,11 @@ memoize!(
         }
 
         if cx.should_report_preempt_count(instance.def_id()) {
-            let mut diag = cx.sess.struct_span_warn(
-                cx.def_span(instance.def_id()),
-                format!(
-                    "reporting preemption count for instance `{}`",
-                    PolyDisplay(&poly_instance)
-                ),
-            );
+            let mut diag = cx.sess.diagnostic().struct_note_without_error(format!(
+                "reporting preemption count for instance `{}`",
+                PolyDisplay(&poly_instance)
+            ));
+            diag.set_span(cx.def_span(instance.def_id()));
             if let Ok(property) = result {
                 diag.note(format!(
                     "adjustment is inferred to be {} and expectation is inferred to be {}",
