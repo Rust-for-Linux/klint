@@ -38,6 +38,33 @@ fn run_ui_tests() -> std::thread::Result<()> {
 fn bless_ui_tests() {
     let extensions = ["stdout", "stderr"].map(OsStr::new);
     let build_dir = PROFILE_PATH.join("test/ui");
+
+    for file in std::fs::read_dir("tests/ui").unwrap() {
+        let file = file.unwrap();
+        if !file
+            .path()
+            .extension()
+            .map_or(false, |ext| extensions.contains(&ext))
+        {
+            continue;
+        }
+
+        let new_file_name = file
+            .path()
+            .with_extension(format!(
+                "stage-id.{}",
+                file.path().extension().unwrap().to_str().unwrap()
+            ))
+            .file_name()
+            .unwrap()
+            .to_owned();
+
+        if !build_dir.join(new_file_name).exists() {
+            println!("removing {}", file.path().display());
+            std::fs::remove_file(file.path()).expect("cannot remove reference file");
+        }
+    }
+
     for file in std::fs::read_dir(&build_dir).unwrap() {
         let file = file.unwrap();
         if !file
@@ -48,21 +75,19 @@ fn bless_ui_tests() {
             continue;
         }
 
-        let ref_file_name = file.file_name().to_str().unwrap().replace(".stage-id", "");
-        let ref_file_path = Path::new("tests/ui")
-            .join(file.path().strip_prefix(&build_dir).unwrap())
-            .with_file_name(ref_file_name);
+        let old_file_name = file.file_name().to_str().unwrap().replace(".stage-id", "");
+        let old_file_path = Path::new("tests/ui").join(old_file_name);
 
         let new_file = std::fs::read(file.path()).unwrap();
-        let old_file = std::fs::read(&ref_file_path).unwrap_or_default();
+        let old_file = std::fs::read(&old_file_path).unwrap_or_default();
 
         if new_file != old_file {
             println!(
                 "updating {} with {}",
-                ref_file_path.display(),
+                old_file_path.display(),
                 file.path().display()
             );
-            std::fs::copy(file.path(), ref_file_path).expect("cannot update reference file");
+            std::fs::copy(file.path(), old_file_path).expect("cannot update reference file");
         }
     }
 }
