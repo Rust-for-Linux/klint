@@ -1,5 +1,3 @@
-use std::cell::Cell;
-
 use rustc_hir::def_id::{CrateNum, DefId, DefIndex};
 use rustc_hir::{Constness, LangItem};
 use rustc_index::bit_set::BitSet;
@@ -164,16 +162,20 @@ impl std::ops::Sub<AdjustmentBounds> for ExpectationRange {
 
 /// Bounds of adjustments.
 ///
-/// Conceptually this only needs a lower bound and an upper bound, but if we encounter code like this
+/// Note that the semilattice join operation is not a normal range join. If we encounter code like this
 /// ```ignore
 /// while foo() {
 ///    enter_atomic();
 /// }
 /// ```
-/// then the bounds will be `0..inf`, and the dataflow analysis will essentially never converge.
+/// then the bounds will be `0..inf`, and the dataflow analysis will never converge because we are changing
+/// the upper bound one at a time.
 ///
-/// To avoid this we would only allow each bound to be changed once, and upon multiple change we would
-/// instantly relax the bound to unbounded, which is not precise but will help the analysis converge.
+/// To ensure convergence, we does not use `max(a.hi, b.hi)` when joining `a` and `b`. But instead,
+/// if `a.hi` and `b.hi` are different but both positive, we immediately relax the bound to unbounded.
+/// Similar relaxing is performed when `a.lo` and `b.lo` are different but both negative.
+/// We still do normal max/min otherwise, e.g. joining `1..5` and `2..5` gives `1..5`, because usually
+/// the preemption count adjustment is close to zero.
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct AdjustmentBounds {
     /// Lower bound of the adjustment, inclusive.
@@ -283,6 +285,58 @@ impl JoinSemiLattice for AdjustmentBounds {
     }
 }
 
+/// Bounds of adjustments or error.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AdjustmentBoundsOrError {
+    Bounds(AdjustmentBounds),
+    TooGeneric,
+    Error,
+}
+
+impl AdjustmentBoundsOrError {
+    #[track_caller]
+    fn unwrap(self) -> AdjustmentBounds {
+        match self {
+            AdjustmentBoundsOrError::Bounds(b) => b,
+            _ => unreachable!(),
+        }
+    }
+
+    fn into_result(self) -> Result<AdjustmentBounds, TooGeneric> {
+        match self {
+            AdjustmentBoundsOrError::Bounds(b) => Ok(b),
+            AdjustmentBoundsOrError::TooGeneric => Err(TooGeneric),
+            AdjustmentBoundsOrError::Error => unreachable!(),
+        }
+    }
+}
+
+impl Default for AdjustmentBoundsOrError {
+    fn default() -> Self {
+        Self::Bounds(Default::default())
+    }
+}
+
+impl JoinSemiLattice for AdjustmentBoundsOrError {
+    fn join(&mut self, other: &Self) -> bool {
+        match (*self, other) {
+            (AdjustmentBoundsOrError::Error, _) => false,
+            (_, AdjustmentBoundsOrError::Error) => {
+                *self = AdjustmentBoundsOrError::Error;
+                true
+            }
+            (AdjustmentBoundsOrError::TooGeneric, _) => false,
+            (_, AdjustmentBoundsOrError::TooGeneric) => {
+                *self = AdjustmentBoundsOrError::TooGeneric;
+                true
+            }
+            (AdjustmentBoundsOrError::Bounds(ref mut a), AdjustmentBoundsOrError::Bounds(b)) => {
+                a.join(b)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Encodable, Decodable)]
 pub struct FunctionContextProperty {
     /// Range of preemption count that the function expects.
@@ -309,14 +363,13 @@ struct AdjustmentComputation<'tcx, 'checker> {
     body: &'tcx Body<'tcx>,
     param_env: ParamEnv<'tcx>,
     instance: Instance<'tcx>,
-    too_generic: Cell<bool>,
 }
 
-impl DebugWithContext<AdjustmentComputation<'_, '_>> for AdjustmentBounds {}
+impl DebugWithContext<AdjustmentComputation<'_, '_>> for AdjustmentBoundsOrError {}
 
 impl<'tcx> AnalysisDomain<'tcx> for AdjustmentComputation<'tcx, '_> {
     // The number here indicates the offset in relation to the function's entry point.
-    type Domain = AdjustmentBounds;
+    type Domain = AdjustmentBoundsOrError;
 
     const NAME: &'static str = "atomic context";
 
@@ -325,10 +378,10 @@ impl<'tcx> AnalysisDomain<'tcx> for AdjustmentComputation<'tcx, '_> {
     }
 
     fn initialize_start_block(&self, _body: &Body<'tcx>, state: &mut Self::Domain) {
-        *state = AdjustmentBounds {
+        *state = AdjustmentBoundsOrError::Bounds(AdjustmentBounds {
             lo: Some(0),
             hi: Some(1),
-        };
+        });
     }
 }
 
@@ -363,6 +416,10 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
             return;
         }
 
+        let AdjustmentBoundsOrError::Bounds(bounds) = state else {
+            return;
+        };
+
         let adjustment = match &terminator.kind {
             TerminatorKind::Call { .. } => self
                 .checker
@@ -384,13 +441,11 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
 
         let Ok(adjustment) = adjustment else {
             // Too generic, need to bail out and retry after monomorphization.
-            *state = AdjustmentBounds::unbounded();
-            // Set flag to indicate that the analysis result is not reliable and don't generate errors.
-            self.too_generic.set(true);
+            *state = AdjustmentBoundsOrError::TooGeneric;
             return;
         };
 
-        *state = state.offset(adjustment);
+        *bounds = bounds.offset(adjustment);
     }
 
     fn apply_call_return_effect(
@@ -864,7 +919,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             }
 
             results.seek_to_block_start(b);
-            if results.get().is_single_value().is_some() {
+            // We can unwrap here because if this function is called, we know that no paths to `Return`
+            // can contain `TooGeneric` or `Error` otherwise we would have returned early (in caller).
+            if results.get().unwrap().is_single_value().is_some() {
                 continue;
             }
 
@@ -897,7 +954,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             }
 
             results.seek_to_block_start(b);
-            if results.get().is_single_value().is_some() {
+            if results.get().unwrap().is_single_value().is_some() {
                 break;
             }
             first_problematic_block = b;
@@ -926,9 +983,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             .copied()
         {
             results.seek_to_block_end(prev_block);
-            let mut end_adjustment = *results.get();
+            let mut end_adjustment = results.get().unwrap();
             results.seek_to_block_start(prev_block);
-            let mut start_adjustment = *results.get();
+            let mut start_adjustment = results.get().unwrap();
 
             // If this block has made no changes to the adjustment, backtrack to the predecessors block
             // that made the change.
@@ -952,9 +1009,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
                 prev_block = b;
                 results.seek_to_block_end(prev_block);
-                end_adjustment = *results.get();
+                end_adjustment = results.get().unwrap();
                 results.seek_to_block_start(prev_block);
-                start_adjustment = *results.get();
+                start_adjustment = results.get().unwrap();
             }
 
             let terminator = body.basic_blocks[prev_block].terminator();
@@ -1027,11 +1084,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         ));
 
         let mir = match instance.def {
-            ty::InstanceDef::DropGlue(def_id, Some(ty)) => {
-                self.tcx.arena.alloc(crate::mir::drop_shim::build_drop_shim(
-                    self.tcx, def_id, param_env, ty,
-                ))
-            }
+            ty::InstanceDef::DropGlue(def_id, Some(ty)) => self.tcx.arena.alloc(
+                crate::mir::drop_shim::build_drop_shim(self.tcx, def_id, param_env, ty),
+            ),
             ty::InstanceDef::Item(def_id) => self.analysis_mir(def_id.did),
             _ => self.analysis_instance_mir(instance.def),
         };
@@ -1049,31 +1104,24 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             body: mir,
             param_env,
             instance,
-            too_generic: Cell::new(false),
         }
         .into_engine(self.tcx, mir)
         .dead_unwinds(&BitSet::new_filled(mir.basic_blocks.len()))
         .iterate_to_fixpoint()
         .into_results_cursor(mir);
 
-        let analysis = analysis_result.analysis();
-
-        if analysis.too_generic.get() {
-            warn!("function too generic");
-            return Err(TooGeneric);
-        }
-
         // Gather adjustments.
         if !annotation.unchecked || adjustment.is_none() {
-            let mut adjustment_infer = AdjustmentBounds::default();
+            let mut adjustment_infer = AdjustmentBoundsOrError::default();
             for (b, data) in rustc_middle::mir::traversal::reachable(mir) {
                 match data.terminator().kind {
                     TerminatorKind::Return => {
-                        adjustment_infer.join(analysis_result.results().entry_set_for_block(b));
+                        adjustment_infer.join(&analysis_result.results().entry_set_for_block(b));
                     }
                     _ => (),
                 }
             }
+            let adjustment_infer = adjustment_infer.into_result()?;
 
             let adjustment_infer = if adjustment_infer.is_empty() {
                 // Diverging function, any value is fine, use the default 0.
@@ -1110,7 +1158,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
                 match self.resolve_function_property(param_env, instance, mir, data.terminator()) {
                     Some(Ok(prop)) => {
-                        let adj = *analysis_result.results().entry_set_for_block(b);
+                        let adj = analysis_result
+                            .results()
+                            .entry_set_for_block(b)
+                            .into_result()?;
 
                         // We need to find a range that for all possible values in `adj`, it will end up in a value
                         // that lands inside `prop.expectation`.
@@ -1156,7 +1207,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         }
                         expectation_infer = expected;
                     }
-                    Some(Err(TooGeneric)) => unreachable!(),
+                    Some(Err(TooGeneric)) => return Err(TooGeneric),
                     None => (),
                 }
             }
