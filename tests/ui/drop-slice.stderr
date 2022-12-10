@@ -1,0 +1,25 @@
+WARN klint::ctxt no klint metadata found for crate core
+error: dropping element of slice causes non-zero preemption count adjustment
+  |
+  = note: adjustment for dropping `LockOnDrop` is 1
+  = note: because slice can contain variable number of elements, adjustment for dropping the slice cannot be computed statically
+
+WARN klint::ctxt no klint metadata found for crate alloc
+note: reporting preemption count for instance `drop_sleep`
+  --> $DIR/drop-slice.rs:20:1
+   |
+20 | fn drop_sleep(x: Box<[SleepOnDrop]>) {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: adjustment is inferred to be 0
+
+note: reporting preemption count for instance `drop_sleep`
+  --> $DIR/drop-slice.rs:20:1
+   |
+20 | fn drop_sleep(x: Box<[SleepOnDrop]>) {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expectation is inferred to be 0
+
+error: aborting due to previous error
+
