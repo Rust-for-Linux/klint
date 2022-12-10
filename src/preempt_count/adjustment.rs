@@ -381,7 +381,7 @@ memoize!(
 );
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)))]
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)), ret)]
     pub fn instance_adjustment<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
@@ -390,7 +390,7 @@ memoize!(
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceDef::Intrinsic(_) => return Ok(0),
-            // No drop glue, then it definitely won't mess with preemption count.
+            // Empty drop glue, then it definitely won't mess with preemption count.
             ty::InstanceDef::DropGlue(_, None) => return Ok(0),
             ty::InstanceDef::DropGlue(_, Some(ty)) => return cx.drop_adjustment(param_env.and(ty)),
             _ => (),
@@ -508,28 +508,22 @@ memoize!(
                 (Ok(a), Ok(b)) if a == b => (),
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
                 (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
+                (Ok(_), Ok(_)) if annotation.adjustment.is_some() => {
+                    bug!("recursive outcome does not match annotation")
+                }
                 (Ok(adj), Ok(_)) => {
                     let mut diag = cx.sess.struct_span_err(
                         cx.def_span(instance.def_id()),
-                        format!(
-                            "this function is recursive but preemption count adjustment is not {}",
-                            annotation.adjustment.unwrap_or(0)
-                        ),
+                        "this function is recursive but preemption count adjustment is not 0",
                     );
                     diag.note(format!("adjustment is inferred to be {}", adj));
                     diag.note(format!(
                         "instance being checked is `{}`",
                         PolyDisplay(&poly_instance)
                     ));
-                    if let Some(adj) = annotation.adjustment {
-                        diag.note(format!(
-                            "the function is annotated to have adjustment of {adj}",
-                        ));
-                    } else {
-                        diag.help(format!(
-                            "try annotate the function with `#[klint::preempt_count(adjust = {adj})]`"
-                        ));
-                    }
+                    diag.help(format!(
+                        "try annotate the function with `#[klint::preempt_count(adjust = {adj})]`"
+                    ));
                     diag.emit();
                 }
             }
@@ -548,7 +542,7 @@ memoize!(
             if let Ok(property) = result {
                 diag.note(format!("adjustment is inferred to be {}", property));
             } else {
-                diag.note("inference failed because this function is too generic");
+                diag.note("adjustment inference failed because this function is too generic");
             }
             diag.emit();
         }

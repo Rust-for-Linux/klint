@@ -165,18 +165,18 @@ impl Default for AdjustmentBoundsOrError {
 
 impl JoinSemiLattice for AdjustmentBoundsOrError {
     fn join(&mut self, other: &Self) -> bool {
-        match (*self, other) {
+        match (self, other) {
             (AdjustmentBoundsOrError::Error, _) => false,
-            (_, AdjustmentBoundsOrError::Error) => {
-                *self = AdjustmentBoundsOrError::Error;
+            (this, AdjustmentBoundsOrError::Error) => {
+                *this = AdjustmentBoundsOrError::Error;
                 true
             }
             (AdjustmentBoundsOrError::TooGeneric, _) => false,
-            (_, AdjustmentBoundsOrError::TooGeneric) => {
-                *self = AdjustmentBoundsOrError::TooGeneric;
+            (this, AdjustmentBoundsOrError::TooGeneric) => {
+                *this = AdjustmentBoundsOrError::TooGeneric;
                 true
             }
-            (AdjustmentBoundsOrError::Bounds(ref mut a), AdjustmentBoundsOrError::Bounds(b)) => {
+            (AdjustmentBoundsOrError::Bounds(a), AdjustmentBoundsOrError::Bounds(b)) => {
                 a.join(b)
             }
         }
