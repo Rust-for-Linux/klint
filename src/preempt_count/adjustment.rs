@@ -393,10 +393,14 @@ memoize!(
             // Empty drop glue, then it definitely won't mess with preemption count.
             ty::InstanceDef::DropGlue(_, None) => return Ok(0),
             ty::InstanceDef::DropGlue(_, Some(ty)) => return cx.drop_adjustment(param_env.and(ty)),
-            ty::InstanceDef::Virtual(..) => {
+            ty::InstanceDef::Virtual(def_id, _) => {
+                if let Some(adj) = cx.preemption_count_annotation(def_id).adjustment {
+                    return Ok(adj);
+                }
+
                 cx.sess.span_warn(
                     cx.def_span(instance.def_id()),
-                    "klint cannot yet check indirect function calls",
+                    "klint cannot yet check indirect function calls without preemption count annotation",
                 );
                 return Ok(0);
             }
@@ -478,6 +482,36 @@ memoize!(
         } else {
             Ok(annotation.adjustment.unwrap())
         };
+
+        // Addition check for trait impl methods.
+        if let Ok(adj) = result &&
+            matches!(instance.def, ty::InstanceDef::Item(_)) &&
+            let Some(impl_) = cx.impl_of_method(instance.def_id()) &&
+            let Some(trait_) = cx.trait_id_of_impl(impl_)
+        {
+            let trait_def = cx.trait_def(trait_);
+            let trait_item = cx
+                .associated_items(impl_)
+                .in_definition_order()
+                .find(|x| x.def_id == instance.def_id())
+                .unwrap()
+                .trait_item_def_id
+                .unwrap();
+            for ancestor in trait_def.ancestors(cx.tcx, impl_).unwrap() {
+                let Some(ancestor_item) = ancestor.item(cx.tcx, trait_item) else { continue };
+                if let Some(ancestor_adj) = cx.preemption_count_annotation(ancestor_item.def_id).adjustment {
+                    if adj != ancestor_adj {
+                        let mut diag = cx.sess.struct_span_err(
+                            cx.def_span(instance.def_id()),
+                            format!("trait method annotated to have preemption count adjustment of {ancestor_adj}"),
+                        );
+                        diag.note(format!("but the adjustment of this implementing function is {adj}"));
+                        diag.span_note(cx.def_span(ancestor_item.def_id), "the trait method is defined here");
+                        diag.emit();
+                    }
+                }
+            }
+        }
 
         // Addition check for FFI functions.
         // Verify that the inferred result is compatible with the FFI list.
