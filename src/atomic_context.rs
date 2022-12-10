@@ -368,8 +368,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'tcx, '_> {
                 .checker
                 .resolve_function_property(self.param_env, self.instance, self.body, terminator)
                 .unwrap()
-                .map(|x| x.adjustment)
-                .ok_or(TooGeneric),
+                .map(|x| x.adjustment),
             TerminatorKind::Drop { place, .. } => {
                 let ty = place.ty(self.body, self.checker.tcx).ty;
                 let ty = self.instance.subst_mir_and_normalize_erasing_regions(
@@ -415,7 +414,7 @@ enum ResolveResult<'tcx> {
     IndirectCall,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Encodable, Decodable)]
 pub struct TooGeneric;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
@@ -556,8 +555,7 @@ memoize!(
         cx.eval_stack.borrow_mut().push(instance);
         let result = cx
             .compute_property(param_env, instance)
-            .map(|x| x.adjustment)
-            .ok_or(TooGeneric);
+            .map(|x| x.adjustment);
 
         // Recursion encountered.
         if let Some(&recur) = cx.query_cache::<drop_adjustment>().borrow().get(&poly_ty) {
@@ -659,16 +657,13 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         instance: Instance<'tcx>,
         body: &Body<'tcx>,
         terminator: &Terminator<'tcx>,
-    ) -> Option<Option<FunctionContextProperty>> {
+    ) -> Option<Result<FunctionContextProperty, TooGeneric>> {
         match self.resolve_function(param_env, instance, body, terminator) {
             Some(ResolveResult::Ok(func)) => {
-                match self.function_context_property(param_env.and(func)) {
-                    Some(v) => Some(Some(v)),
-                    None => Some(None),
-                }
+                Some(self.instance_preempt_count_property(param_env.and(func)))
             }
-            Some(ResolveResult::TooGeneric) => Some(None),
-            Some(ResolveResult::IndirectCall) => Some(Some(FunctionContextProperty {
+            Some(ResolveResult::TooGeneric) => Some(Err(TooGeneric)),
+            Some(ResolveResult::IndirectCall) => Some(Ok(FunctionContextProperty {
                 expectation: ExpectationRange::top(),
                 adjustment: 0,
             })),
@@ -885,12 +880,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         &self,
         param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
-    ) -> Option<FunctionContextProperty> {
+    ) -> Result<FunctionContextProperty, TooGeneric> {
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
-            ty::InstanceDef::Intrinsic(_) => return Some(Default::default()),
+            ty::InstanceDef::Intrinsic(_) => return Ok(Default::default()),
             // No drop glue, then it definitely won't mess with preemption count.
-            ty::InstanceDef::DropGlue(_, None) => return Some(Default::default()),
+            ty::InstanceDef::DropGlue(_, None) => return Ok(Default::default()),
             _ => (),
         }
 
@@ -944,7 +939,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         if analysis.too_generic.get() {
             warn!("function too generic");
-            return None;
+            return Err(TooGeneric);
         }
 
         // Gather adjustments.
@@ -993,7 +988,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 }
 
                 match self.resolve_function_property(param_env, instance, mir, data.terminator()) {
-                    Some(Some(prop)) => {
+                    Some(Ok(prop)) => {
                         let adj = *analysis_result.results().entry_set_for_block(b);
 
                         // We need to find a range that for all possible values in `adj`, it will end up in a value
@@ -1040,7 +1035,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         }
                         expectation_infer = expected;
                     }
-                    Some(None) => unreachable!(),
+                    Some(Err(TooGeneric)) => unreachable!(),
                     None => (),
                 }
             }
@@ -1067,7 +1062,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             }
         }
 
-        Some(FunctionContextProperty {
+        Ok(FunctionContextProperty {
             expectation: expectation.unwrap(),
             adjustment: adjustment.unwrap(),
         })
@@ -1098,16 +1093,16 @@ where
 
 memoize!(
     #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)))]
-    pub fn function_context_property<'tcx>(
+    pub fn instance_preempt_count_property<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
-    ) -> Option<FunctionContextProperty> {
+    ) -> Result<FunctionContextProperty, TooGeneric> {
         let (param_env, instance) = poly_instance.into_parts();
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
-            ty::InstanceDef::Intrinsic(_) => return Some(Default::default()),
+            ty::InstanceDef::Intrinsic(_) => return Ok(Default::default()),
             ty::InstanceDef::DropGlue(_, Some(ty)) => {
-                cx.drop_adjustment(param_env.and(ty)).ok()?;
+                cx.drop_adjustment(param_env.and(ty))?;
             }
             _ => (),
         }
@@ -1129,19 +1124,19 @@ memoize!(
                     identity_instance,
                     poly_instance
                 );
-                match cx.function_context_property(identity_instance) {
-                    Some(v) => return Some(v),
-                    None => (),
+                match cx.instance_preempt_count_property(identity_instance) {
+                    Ok(v) => return Ok(v),
+                    Err(TooGeneric) => (),
                 }
             }
         }
 
         if cx.is_foreign_item(instance.def_id()) {
-            return Some(cx.ffi_property(instance));
+            return Ok(cx.ffi_property(instance));
         }
 
         if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
-            if let Some(p) = cx.sql_load::<function_context_property>(poly_instance) {
+            if let Some(p) = cx.sql_load::<instance_preempt_count_property>(poly_instance) {
                 return p;
             }
 
@@ -1149,16 +1144,16 @@ memoize!(
                 "Unable to compute property of non-local function {:?}",
                 instance
             );
-            return Some(Default::default());
+            return Ok(Default::default());
         }
 
         if cx.eval_stack.borrow().contains(&instance) {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
-                return Some(Default::default());
+                return Ok(Default::default());
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
-                return None;
+                return Err(TooGeneric);
             }
         }
 
@@ -1167,7 +1162,7 @@ memoize!(
 
         // Recursion encountered.
         if let Some(recur) = cx
-            .query_cache::<function_context_property>()
+            .query_cache::<instance_preempt_count_property>()
             .borrow()
             .get(&poly_instance)
         {
@@ -1176,7 +1171,7 @@ memoize!(
                     cx.def_span(instance.def_id()),
                     "this function is recursive but carries no context specification",
                 );
-                if let Some(property) = result {
+                if let Ok(property) = result {
                     diag.note(format!(
                         "adjustment is inferred to be {} and expectation is inferred to be {}",
                         property.adjustment, property.expectation
@@ -1187,7 +1182,7 @@ memoize!(
         }
 
         if instance.def_id().is_local() && (generic || param_env.caller_bounds().is_empty()) {
-            cx.sql_store::<function_context_property>(poly_instance, result);
+            cx.sql_store::<instance_preempt_count_property>(poly_instance, result);
         }
 
         cx.eval_stack.borrow_mut().pop();
@@ -1195,7 +1190,7 @@ memoize!(
     }
 );
 
-impl crate::ctxt::PersistentQuery for function_context_property {
+impl crate::ctxt::PersistentQuery for instance_preempt_count_property {
     type LocalKey<'tcx> = Instance<'tcx>;
 
     fn into_crate_and_local<'tcx>(key: Self::Key<'tcx>) -> (CrateNum, Self::LocalKey<'tcx>) {
@@ -1298,7 +1293,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
             def_id.into(),
         ));
         let instance = Instance::new(def_id.into(), identity);
-        self.cx.function_context_property(
+        let _ = self.cx.instance_preempt_count_property(
             self.cx
                 .param_env_reveal_all_normalized(def_id)
                 .with_constness(Constness::NotConst)
@@ -1316,7 +1311,8 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         for mono_item in mono_items {
             if let MonoItem::Fn(instance) = mono_item {
                 self.cx
-                    .function_context_property(ParamEnv::reveal_all().and(instance));
+                    .instance_preempt_count_property(ParamEnv::reveal_all().and(instance))
+                    .expect("monomorphized function should not be too generic");
             }
         }
 
