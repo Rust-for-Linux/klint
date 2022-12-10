@@ -55,6 +55,13 @@ impl AdjustmentBounds {
             _ => None,
         }
     }
+
+    pub fn single_value(v: i32) -> Self {
+        Self {
+            lo: Some(v),
+            hi: Some(v + 1),
+        }
+    }
 }
 
 impl Default for AdjustmentBounds {

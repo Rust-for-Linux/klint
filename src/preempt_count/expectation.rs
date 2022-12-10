@@ -182,14 +182,44 @@ memoize!(
                     return Ok(ExpectationRange::top());
                 }
 
+                // Special case for no expectation at all. No need to check adjustment here.
                 let param_and_elem_ty = param_env.and(*elem_ty);
-                let elem_adj = cx.drop_adjustment(param_and_elem_ty)?;
                 let elem_exp = cx.drop_expectation(param_and_elem_ty)?;
+                if elem_exp == ExpectationRange::top() {
+                    return Ok(ExpectationRange::top());
+                }
+
+                let elem_adj = cx.drop_adjustment(param_and_elem_ty)?;
                 if elem_adj == 0 {
                     return Ok(elem_exp);
                 }
 
-                // TODO: deal with this case without using the MIR based logic.
+                // If any error happens here, it'll happen in adjustment calculation too, so just return
+                // to avoid duplicate errors.
+                let Ok(size) = i32::try_from(size?) else { return Ok(ExpectationRange::top()); };
+                let Some(last_adj) = (size - 1).checked_mul(elem_adj) else { return Ok(ExpectationRange::top()); };
+
+                let last_adj_bound = AdjustmentBounds::single_value(last_adj);
+
+                let mut expected = elem_exp - last_adj_bound;
+                expected.meet(&elem_exp);
+                if expected.is_empty() {
+                    let mut diag = cx.sess.struct_err(format!(
+                        "dropping element of array expects the preemption count to be {}",
+                        elem_exp
+                    ));
+                    diag.note(format!(
+                        "but the possible preemption count when dropping the last element is {}",
+                        elem_exp + last_adj_bound
+                    ));
+                    diag.note(format!("array being dropped is `{}`", ty));
+                    diag.emit();
+
+                    // For failed inference, revert to the default.
+                    expected = ExpectationRange::top();
+                }
+
+                return Ok(expected);
             }
 
             ty::Slice(elem_ty) => {
