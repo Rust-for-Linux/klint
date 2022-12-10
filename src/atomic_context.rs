@@ -731,161 +731,153 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
     fn report_adjustment_infer_error(
         &self,
-        param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
         body: &Body<'tcx>,
-        analysis_result: &rustc_mir_dataflow::ResultsCursor<
+        results: &mut rustc_mir_dataflow::ResultsCursor<
             'tcx,
             'tcx,
             AdjustmentComputation<'tcx, '_>,
         >,
     ) {
         // First step, see if there are any path that leads to a `return` statement have `Top` directly.
-        // If so, just report this.
+        let mut return_bb = None;
         for (b, data) in rustc_middle::mir::traversal::reachable(body) {
             match data.terminator().kind {
                 TerminatorKind::Return => (),
                 _ => continue,
             }
 
-            let result = analysis_result.results().entry_set_for_block(b);
-            if result.is_single_value().is_some() {
+            results.seek_to_block_start(b);
+            if results.get().is_single_value().is_some() {
                 continue;
             }
 
-            // Find the deepest single-value block in the dominator tree.
-            let mut first_problematic_block = b;
-            let dominators = body.basic_blocks.dominators();
-            loop {
-                let b = dominators.immediate_dominator(first_problematic_block);
-                if b == first_problematic_block {
-                    // Shouldn't actually happen because the entry block should always have a single value.
-                    break;
-                }
-
-                let result = analysis_result.results().entry_set_for_block(b);
-                if result.is_single_value().is_some() {
-                    break;
-                }
-                first_problematic_block = b;
-            }
-
-            // For this problematic block, try use a span that closest to the beginning of it.
-            let span = body.basic_blocks[first_problematic_block]
-                .statements
-                .first()
-                .map(|x| x.source_info.span)
-                .unwrap_or_else(|| {
-                    body.basic_blocks[first_problematic_block]
-                        .terminator()
-                        .source_info
-                        .span
-                });
-
-            let mut diag = self.tcx.sess.struct_span_err(
-                span,
-                "cannot infer preemption count adjustment at this point",
-            );
-
-            let mut count = 0;
-            for mut prev_block in body.basic_blocks.predecessors()[first_problematic_block]
-                .iter()
-                .copied()
-            {
-                let adjust_calc = |bb| {
-                    let terminator = body.basic_blocks[bb].terminator();
-
-                    // Compute the preemption count from this predecessor block.
-                    // This value is the entry state, so we need to re-apply the adjustment.
-                    (
-                        analysis_result
-                            .results()
-                            .entry_set_for_block(bb)
-                            .is_single_value(),
-                        match self.resolve_function_property(param_env, instance, body, terminator)
-                        {
-                            Some(Some(prop)) => prop.adjustment,
-                            Some(None) => unreachable!(),
-                            None => 0,
-                        },
-                    )
-                };
-
-                let mut adjustment = adjust_calc(prev_block);
-
-                // If this block has made no changes to the adjustment, backtrack to the parent block
-                // that made the change.
-                while adjustment.1 == 0 {
-                    let pred = &body.basic_blocks.predecessors()[prev_block];
-
-                    // Don't continue backtracking if there are multiple predecessors.
-                    if pred.len() != 1 {
-                        break;
-                    }
-                    let b = pred[0];
-
-                    // Don't continue backtracking if the predecessor block has multiple successors.
-                    let terminator = body.basic_blocks[b].terminator();
-                    let successor_count = terminator.successors().count();
-                    let has_unwind = terminator.unwind().map(|x| x.is_some()).unwrap_or(false);
-                    let normal_successor = successor_count - has_unwind as usize;
-                    if normal_successor != 1 {
-                        break;
-                    }
-
-                    prev_block = b;
-                    adjustment = adjust_calc(prev_block);
-                }
-
-                let terminator = body.basic_blocks[prev_block].terminator();
-                let span = match terminator.kind {
-                    TerminatorKind::Goto { .. } => {
-                        // Goto terminator of `if .. { .. } else { .. }` has span on the entire expression,
-                        // which is not very useful.
-                        // In this case we use the last statement's span instead.
-                        body.basic_blocks[prev_block]
-                            .statements
-                            .last()
-                            .map(|x| x.source_info)
-                            .unwrap_or_else(|| terminator.source_info)
-                            .span
-                    }
-                    _ => terminator.source_info.span,
-                };
-
-                let mut msg = match adjustment.0 {
-                    None => {
-                        format!("preemption count adjustment is changed in the previous iteration of the loop")
-                    }
-                    Some(v) => {
-                        format!(
-                            "preemption count adjustment is {} after this",
-                            v + adjustment.1
-                        )
-                    }
-                };
-
-                match count {
-                    0 => (),
-                    1 => msg = format!("while {}", msg),
-                    _ => msg = format!("and {}", msg),
-                }
-                count += 1;
-                diag.span_note(span, msg);
-            }
-            diag.emit();
-            return;
+            return_bb = Some(b);
+            break;
         }
 
         // A catch-all error. MIR building usually should just have one `Return` terminator
-        // so this usually shouldn't be reached.
-        self.tcx
-            .sess
-            .struct_span_err(
-                self.tcx.def_span(instance.def_id()),
-                "cannot infer preemption count adjustment of this function",
-            )
-            .emit();
+        // so this usually shouldn't happen.
+        let Some(return_bb) = return_bb else {
+            self.tcx
+                .sess
+                .struct_span_err(
+                    self.tcx.def_span(instance.def_id()),
+                    "cannot infer preemption count adjustment of this function",
+                )
+                .emit();
+
+            return;
+        };
+
+        // Find the deepest single-value block in the dominator tree.
+        let mut first_problematic_block = return_bb;
+        let dominators = body.basic_blocks.dominators();
+        loop {
+            let b = dominators.immediate_dominator(first_problematic_block);
+            if b == first_problematic_block {
+                // Shouldn't actually happen because the entry block should always have a single value.
+                break;
+            }
+
+            results.seek_to_block_start(b);
+            if results.get().is_single_value().is_some() {
+                break;
+            }
+            first_problematic_block = b;
+        }
+
+        // For this problematic block, try use a span that closest to the beginning of it.
+        let span = body.basic_blocks[first_problematic_block]
+            .statements
+            .first()
+            .map(|x| x.source_info.span)
+            .unwrap_or_else(|| {
+                body.basic_blocks[first_problematic_block]
+                    .terminator()
+                    .source_info
+                    .span
+            });
+
+        let mut diag = self.tcx.sess.struct_span_err(
+            span,
+            "cannot infer preemption count adjustment at this point",
+        );
+
+        let mut count = 0;
+        for mut prev_block in body.basic_blocks.predecessors()[first_problematic_block]
+            .iter()
+            .copied()
+        {
+            results.seek_to_block_end(prev_block);
+            let mut end_adjustment = *results.get();
+            results.seek_to_block_start(prev_block);
+            let mut start_adjustment = *results.get();
+
+            // If this block has made no changes to the adjustment, backtrack to the predecessors block
+            // that made the change.
+            while start_adjustment == end_adjustment {
+                let pred = &body.basic_blocks.predecessors()[prev_block];
+
+                // Don't continue backtracking if there are multiple predecessors.
+                if pred.len() != 1 {
+                    break;
+                }
+                let b = pred[0];
+
+                // Don't continue backtracking if the predecessor block has multiple successors.
+                let terminator = body.basic_blocks[b].terminator();
+                let successor_count = terminator.successors().count();
+                let has_unwind = terminator.unwind().map(|x| x.is_some()).unwrap_or(false);
+                let normal_successor = successor_count - has_unwind as usize;
+                if normal_successor != 1 {
+                    break;
+                }
+
+                prev_block = b;
+                results.seek_to_block_end(prev_block);
+                end_adjustment = *results.get();
+                results.seek_to_block_start(prev_block);
+                start_adjustment = *results.get();
+            }
+
+            let terminator = body.basic_blocks[prev_block].terminator();
+            let span = match terminator.kind {
+                TerminatorKind::Goto { .. } => {
+                    // Goto terminator of `if .. { .. } else { .. }` has span on the entire expression,
+                    // which is not very useful.
+                    // In this case we use the last statement's span instead.
+                    body.basic_blocks[prev_block]
+                        .statements
+                        .last()
+                        .map(|x| x.source_info)
+                        .unwrap_or_else(|| terminator.source_info)
+                        .span
+                }
+                _ => terminator.source_info.span,
+            };
+
+            let mut msg = match start_adjustment.is_single_value() {
+                None => {
+                    format!("preemption count adjustment is changed in the previous iteration of the loop")
+                }
+                Some(_) => {
+                    format!(
+                        "preemption count adjustment is {:?} after this",
+                        end_adjustment
+                    )
+                }
+            };
+
+            match count {
+                0 => (),
+                1 => msg = format!("while {}", msg),
+                _ => msg = format!("and {}", msg),
+            }
+            count += 1;
+            diag.span_note(span, msg);
+        }
+        diag.emit();
     }
 
     #[instrument(skip_all, fields(instance=%instance), ret)]
@@ -936,7 +928,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         //     &mut std::io::stderr(),
         // )
         // .unwrap();
-        let analysis_result = AdjustmentComputation {
+        let mut analysis_result = AdjustmentComputation {
             checker: self,
             body: mir,
             param_env,
@@ -973,7 +965,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             } else if let Some(v) = adjustment_infer.is_single_value() {
                 v
             } else {
-                self.report_adjustment_infer_error(param_env, instance, mir, &analysis_result);
+                self.report_adjustment_infer_error(instance, mir, &mut analysis_result);
                 0
             };
 
