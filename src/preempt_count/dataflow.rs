@@ -3,7 +3,7 @@ use rustc_middle::ty::{self, Instance, ParamEnv};
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
 
-use super::TooGeneric;
+use super::*;
 use crate::ctxt::AnalysisCtxt;
 
 /// Bounds of adjustments.
@@ -176,9 +176,7 @@ impl JoinSemiLattice for AdjustmentBoundsOrError {
                 *this = AdjustmentBoundsOrError::TooGeneric;
                 true
             }
-            (AdjustmentBoundsOrError::Bounds(a), AdjustmentBoundsOrError::Bounds(b)) => {
-                a.join(b)
-            }
+            (AdjustmentBoundsOrError::Bounds(a), AdjustmentBoundsOrError::Bounds(b)) => a.join(b),
         }
     }
 }

@@ -7,7 +7,7 @@ use rustc_mir_dataflow::lattice::MeetSemiLattice;
 use rustc_mir_dataflow::Analysis;
 
 use super::dataflow::AdjustmentComputation;
-use super::{ExpectationRange, PolyDisplay, TooGeneric};
+use super::*;
 use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
@@ -283,13 +283,13 @@ memoize!(
             _ => (),
         }
 
-        let poly_param_env = cx
-            .param_env_reveal_all_normalized(instance.def_id())
-            .with_constness(Constness::NotConst);
-        let poly_substs =
-            cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
         let mut generic = false;
-        if !cx.trait_of_item(instance.def_id()).is_some() {
+        if matches!(instance.def, ty::InstanceDef::Item(_)) {
+            let poly_param_env = cx
+                .param_env_reveal_all_normalized(instance.def_id())
+                .with_constness(Constness::NotConst);
+            let poly_substs =
+                cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
             let poly_poly_instance =
                 poly_param_env.and(Instance::new(instance.def_id(), poly_substs));
             generic = poly_poly_instance == poly_instance;
