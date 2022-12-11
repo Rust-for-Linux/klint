@@ -248,13 +248,25 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                     callee_ty,
                 );
                 if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
-                    match ty::Instance::resolve(self.checker.tcx, self.param_env, def_id, substs)
+                    if let Some(v) = self.checker.preemption_count_annotation(def_id).adjustment {
+                        // Fast path, no need to resolve the instance.
+                        // This also avoids `TooGeneric` when def_id is an trait method.
+                        Ok(v)
+                    } else {
+                        match ty::Instance::resolve(
+                            self.checker.tcx,
+                            self.param_env,
+                            def_id,
+                            substs,
+                        )
                         .unwrap()
-                    {
-                        Some(instance) => self
-                            .checker
-                            .instance_adjustment(self.param_env.and(instance)),
-                        None => Err(TooGeneric),
+                        {
+                            Some(instance) => {
+                                self.checker
+                                    .instance_adjustment(self.param_env.and(instance))
+                            }
+                            None => Err(TooGeneric),
+                        }
                     }
                 } else {
                     self.checker.sess.span_warn(

@@ -50,10 +50,16 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let callee_ty = instance
                         .subst_mir_and_normalize_erasing_regions(self.tcx, param_env, callee_ty);
                     if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
-                        let instance = ty::Instance::resolve(self.tcx, param_env, def_id, substs)
-                            .unwrap()
-                            .ok_or(TooGeneric)?;
-                        self.instance_expectation(param_env.and(instance))?
+                        if let Some(v) = self.preemption_count_annotation(def_id).expectation {
+                            // Fast path, no need to resolve the instance.
+                            // This also avoids `TooGeneric` when def_id is an trait method.
+                            v
+                        } else {
+                            let instance = ty::Instance::resolve(self.tcx, param_env, def_id, substs)
+                                .unwrap()
+                                .ok_or(TooGeneric)?;
+                            self.instance_expectation(param_env.and(instance))?
+                        }
                     } else {
                         self.sess.span_warn(
                             data.terminator().source_info.span,
