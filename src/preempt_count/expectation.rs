@@ -150,17 +150,20 @@ memoize!(
         }
 
         match ty.kind() {
-            ty::Closure(_, substs) => (),
+            ty::Closure(_, substs) => {
+                return cx.drop_expectation(param_env.and(substs.as_closure().tupled_upvars_ty()));
+            }
 
             // Generator drops are non-trivial, use the generated drop shims instead.
             ty::Generator(..) => (),
 
-            ty::Tuple(list) => (),
+            ty::Tuple(_list) => (),
 
             ty::Adt(def, substs) if def.is_box() => {
                 let exp = cx.drop_expectation(param_env.and(substs.type_at(0)))?;
                 let box_free = cx.require_lang_item(LangItem::BoxFree, None);
-                let box_free_exp = cx.instance_expectation(param_env.and(Instance::new(box_free, substs)))?;
+                let box_free_exp =
+                    cx.instance_expectation(param_env.and(Instance::new(box_free, substs)))?;
 
                 // Usuaully freeing the box shouldn't have any instance expectations, so short circuit here.
                 if box_free_exp == ExpectationRange::top() {

@@ -243,13 +243,7 @@ memoize!(
 
         match ty.kind() {
             ty::Closure(_, substs) => {
-                let mut adj = 0i32;
-                for elem_ty in substs.as_closure().upvar_tys() {
-                    let elem_adj = cx.drop_adjustment(param_env.and(elem_ty))?;
-                    let Some(new_adj) = adj.checked_add(elem_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
-                    adj = new_adj;
-                }
-                return Ok(adj);
+                return cx.drop_adjustment(param_env.and(substs.as_closure().tupled_upvars_ty()));
             }
 
             // Generator drops are non-trivial, use the generated drop shims instead.
