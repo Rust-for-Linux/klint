@@ -265,6 +265,15 @@ memoize!(
                 return Ok(adj);
             }
 
+            ty::Adt(def, substs) if def.is_box() => {
+                let adj = cx.drop_adjustment(param_env.and(substs.type_at(0)))?;
+                let box_free = cx.require_lang_item(LangItem::BoxFree, None);
+                let box_free_adj =
+                    cx.instance_adjustment(param_env.and(Instance::new(box_free, substs)))?;
+                let Some(adj) = adj.checked_add(box_free_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
+                return Ok(adj);
+            }
+
             ty::Adt(def, _) => {
                 // For Adts, we first try to not use any of the substs and just try the most
                 // polymorphic version of the type.

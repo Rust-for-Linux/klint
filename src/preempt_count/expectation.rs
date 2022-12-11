@@ -151,6 +151,40 @@ memoize!(
 
             ty::Tuple(list) => (),
 
+            ty::Adt(def, substs) if def.is_box() => {
+                let exp = cx.drop_expectation(param_env.and(substs.type_at(0)))?;
+                let box_free = cx.require_lang_item(LangItem::BoxFree, None);
+                let box_free_exp = cx.instance_expectation(param_env.and(Instance::new(box_free, substs)))?;
+
+                // Usuaully freeing the box shouldn't have any instance expectations, so short circuit here.
+                if box_free_exp == ExpectationRange::top() {
+                    return Ok(exp);
+                }
+
+                let adj = cx.drop_adjustment(param_env.and(substs.type_at(0)))?;
+                let adj_bound = AdjustmentBounds::single_value(adj);
+
+                let mut expected = box_free_exp - adj_bound;
+                expected.meet(&exp);
+                if expected.is_empty() {
+                    let mut diag = cx.sess.struct_err(format!(
+                        "freeing the box expects the preemption count to be {}",
+                        box_free_exp
+                    ));
+                    diag.note(format!(
+                        "but the possible preemption count after dropping the content is {}",
+                        exp + adj_bound
+                    ));
+                    diag.note(format!("content being dropped is `{}`", substs.type_at(0)));
+                    diag.emit();
+
+                    // For failed inference, revert to the default.
+                    expected = ExpectationRange::top();
+                }
+
+                return Ok(expected);
+            }
+
             ty::Adt(def, _) => {
                 // For Adts, we first try to not use any of the substs and just try the most
                 // polymorphic version of the type.
