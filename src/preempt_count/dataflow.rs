@@ -262,17 +262,25 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                         .unwrap()
                         {
                             Some(instance) => {
-                                self.checker
-                                    .instance_adjustment(self.param_env.and(instance))
+                                self.checker.call_stack.borrow_mut().push(UseSite {
+                                    instance: self.param_env.and(self.instance),
+                                    kind: UseSiteKind::Call(terminator.source_info.span),
+                                });
+                                let result = self
+                                    .checker
+                                    .instance_adjustment(self.param_env.and(instance));
+                                self.checker.call_stack.borrow_mut().pop();
+                                result
                             }
                             None => Err(TooGeneric),
                         }
                     }
                 } else {
-                    self.checker.sess.span_warn(
-                        terminator.source_info.span,
-                        "klint cannot yet check indirect function calls",
-                    );
+                    self.checker
+                        .emit_with_use_site_info(self.checker.sess.struct_span_warn(
+                            terminator.source_info.span,
+                            "klint cannot yet check indirect function calls",
+                        ));
                     Ok(0)
                 }
             }
@@ -284,7 +292,16 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                     ty,
                 );
 
-                self.checker.drop_adjustment(self.param_env.and(ty))
+                self.checker.call_stack.borrow_mut().push(UseSite {
+                    instance: self.param_env.and(self.instance),
+                    kind: UseSiteKind::Drop {
+                        drop_span: terminator.source_info.span,
+                        place_span: self.body.local_decls[place.local].source_info.span,
+                    },
+                });
+                let result = self.checker.drop_adjustment(self.param_env.and(ty));
+                self.checker.call_stack.borrow_mut().pop();
+                result
             }
             _ => return,
         };

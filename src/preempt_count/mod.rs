@@ -3,8 +3,9 @@ pub mod annotation;
 pub mod dataflow;
 pub mod expectation;
 
-use rustc_middle::ty::ParamEnvAnd;
+use rustc_middle::ty::{ParamEnvAnd, Instance};
 use rustc_mir_dataflow::lattice::MeetSemiLattice;
+use rustc_span::Span;
 
 use self::dataflow::AdjustmentBounds;
 
@@ -141,4 +142,19 @@ impl std::ops::Sub<AdjustmentBounds> for ExpectationRange {
             },
         }
     }
+}
+
+pub enum UseSiteKind {
+    Call(Span),
+    Drop {
+        /// Span that causes the drop.
+        drop_span: Span,
+        /// Span of the place being dropped.
+        place_span: Span,
+    },
+}
+
+pub struct UseSite<'tcx> {
+    pub instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
+    pub kind: UseSiteKind,
 }

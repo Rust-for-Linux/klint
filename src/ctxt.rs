@@ -5,8 +5,10 @@ use rusqlite::{Connection, OptionalExtension};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::sync::Lrc;
 use rustc_hir::def_id::{CrateNum, LOCAL_CRATE};
-use rustc_middle::ty::{Instance, TyCtxt};
+use rustc_middle::ty::TyCtxt;
 use rustc_serialize::{Decodable, Encodable};
+
+use crate::preempt_count::UseSite;
 
 pub(crate) trait Query: 'static {
     const NAME: &'static str;
@@ -46,7 +48,7 @@ pub struct AnalysisCtxt<'tcx> {
     pub local_conn: Connection,
     pub sql_conn: RefCell<FxHashMap<CrateNum, Option<Lrc<Connection>>>>,
 
-    pub eval_stack: RefCell<Vec<Instance<'tcx>>>,
+    pub call_stack: RefCell<Vec<UseSite<'tcx>>>,
     pub query_cache: RefCell<FxHashMap<TypeId, Lrc<dyn Any>>>,
 }
 
@@ -268,7 +270,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             tcx,
             local_conn: conn,
             sql_conn: Default::default(),
-            eval_stack: Default::default(),
+            call_stack: Default::default(),
             query_cache: Default::default(),
         };
         ret.sql_create_table::<crate::preempt_count::annotation::preemption_count_annotation>();

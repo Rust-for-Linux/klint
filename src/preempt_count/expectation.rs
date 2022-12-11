@@ -55,16 +55,23 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                             // This also avoids `TooGeneric` when def_id is an trait method.
                             v
                         } else {
-                            let instance = ty::Instance::resolve(self.tcx, param_env, def_id, substs)
-                                .unwrap()
-                                .ok_or(TooGeneric)?;
-                            self.instance_expectation(param_env.and(instance))?
+                            let instance =
+                                ty::Instance::resolve(self.tcx, param_env, def_id, substs)
+                                    .unwrap()
+                                    .ok_or(TooGeneric)?;
+                            self.call_stack.borrow_mut().push(UseSite {
+                                instance: param_env.and(instance),
+                                kind: UseSiteKind::Call(data.terminator().source_info.span),
+                            });
+                            let result = self.instance_expectation(param_env.and(instance));
+                            self.call_stack.borrow_mut().pop();
+                            result?
                         }
                     } else {
-                        self.sess.span_warn(
+                        self.emit_with_use_site_info(self.sess.struct_span_warn(
                             data.terminator().source_info.span,
                             "klint cannot yet check indirect function calls",
-                        );
+                        ));
                         ExpectationRange::top()
                     }
                 }
@@ -73,7 +80,16 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let ty =
                         instance.subst_mir_and_normalize_erasing_regions(self.tcx, param_env, ty);
 
-                    self.drop_expectation(param_env.and(ty))?
+                    self.call_stack.borrow_mut().push(UseSite {
+                        instance: param_env.and(instance),
+                        kind: UseSiteKind::Drop {
+                            drop_span: data.terminator().source_info.span,
+                            place_span: body.local_decls[place.local].source_info.span,
+                        },
+                    });
+                    let result = self.drop_expectation(param_env.and(ty));
+                    self.call_stack.borrow_mut().pop();
+                    result?
                 }
                 _ => continue,
             };
@@ -120,7 +136,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     "but the possible preemption count at this point is {}",
                     expectation_infer + adjustment
                 ));
-                diag.emit();
+                self.emit_with_use_site_info(diag);
 
                 // For failed inference, revert to the default.
                 expectation_infer = ExpectationRange::top();
@@ -185,7 +201,7 @@ memoize!(
                         exp + adj_bound
                     ));
                     diag.note(format!("content being dropped is `{}`", substs.type_at(0)));
-                    diag.emit();
+                    cx.emit_with_use_site_info(diag);
 
                     // For failed inference, revert to the default.
                     expected = ExpectationRange::top();
@@ -256,7 +272,7 @@ memoize!(
                         elem_exp + last_adj_bound
                     ));
                     diag.note(format!("array being dropped is `{}`", ty));
-                    diag.emit();
+                    cx.emit_with_use_site_info(diag);
 
                     // For failed inference, revert to the default.
                     expected = ExpectationRange::top();
@@ -280,13 +296,14 @@ memoize!(
         let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
             .unwrap()
             .unwrap();
+        let poly_instance = param_env.and(instance);
 
         assert!(matches!(
             instance.def,
             ty::InstanceDef::DropGlue(_, Some(_))
         ));
 
-        if cx.eval_stack.borrow().contains(&instance) {
+        if cx.call_stack.borrow().iter().rev().any(|x| x.instance == poly_instance) {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
                 return Ok(ExpectationRange::top());
@@ -295,8 +312,6 @@ memoize!(
                 return Err(TooGeneric);
             }
         }
-
-        cx.eval_stack.borrow_mut().push(instance);
 
         let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
         let result = cx.infer_expectation(param_env, instance, &mir);
@@ -326,7 +341,6 @@ memoize!(
         //     cx.sql_store::<drop_adjustment>(poly_instance, result);
         // }
 
-        cx.eval_stack.borrow_mut().pop();
         result
     }
 );
@@ -351,10 +365,10 @@ memoize!(
                     return Ok(exp);
                 }
 
-                cx.sess.span_warn(
+                cx.emit_with_use_site_info(cx.sess.struct_span_warn(
                     cx.def_span(instance.def_id()),
                     "klint cannot yet check indirect function calls without preemption count annotation",
-                );
+                ));
                 return Ok(ExpectationRange::top());
             }
             _ => (),
@@ -399,7 +413,7 @@ memoize!(
             info!("expectation {} from annotation", exp);
         }
 
-        if cx.eval_stack.borrow().contains(&instance) {
+        if cx.call_stack.borrow().iter().rev().any(|x| x.instance == poly_instance) {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
                 return Ok(annotation.expectation.unwrap_or_else(ExpectationRange::top));
@@ -408,8 +422,6 @@ memoize!(
                 return Err(TooGeneric);
             }
         }
-
-        cx.eval_stack.borrow_mut().push(instance);
 
         let mir = cx.analysis_instance_mir(instance.def);
         let result = if !annotation.unchecked || annotation.expectation.is_none() {
@@ -469,7 +481,7 @@ memoize!(
                         );
                         diag.note(format!("but the expectation of this implementing function is {exp}"));
                         diag.span_note(cx.def_span(ancestor_item.def_id), "the trait method is defined here");
-                        diag.emit();
+                        cx.emit_with_use_site_info(diag);
                     }
                 }
             }
@@ -553,7 +565,6 @@ memoize!(
             diag.emit();
         }
 
-        cx.eval_stack.borrow_mut().pop();
         result
     }
 );

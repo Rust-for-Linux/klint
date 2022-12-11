@@ -1,3 +1,4 @@
+use rustc_errors::{DiagnosticBuilder, EmissionGuarantee, MultiSpan};
 use rustc_hir::def_id::CrateNum;
 use rustc_hir::{Constness, LangItem};
 use rustc_index::bit_set::BitSet;
@@ -15,12 +16,42 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         &self,
         poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
     ) -> Result<i32, TooGeneric> {
-        let mut diag = self.sess.struct_err(format!(
+        let diag = self.sess.struct_err(format!(
             "preemption count overflow when trying to compute adjustment of type `{}",
             PolyDisplay(&poly_ty)
         ));
-        diag.emit();
+        self.emit_with_use_site_info(diag);
         return Ok(0);
+    }
+
+    pub fn emit_with_use_site_info<G: EmissionGuarantee>(
+        &self,
+        mut diag: DiagnosticBuilder<'tcx, G>,
+    ) -> G {
+        for site in self.call_stack.borrow().iter().rev() {
+            match &site.kind {
+                UseSiteKind::Call(span) => {
+                    if diag.span.is_dummy() {
+                        diag.set_span(*span);
+                    } else {
+                        diag.span_note(*span, "which is called from here");
+                    }
+                }
+                UseSiteKind::Drop {
+                    drop_span,
+                    place_span,
+                } => {
+                    let mut multispan = MultiSpan::from_span(*drop_span);
+                    multispan.push_span_label(*place_span, "value being dropped is here");
+                    if diag.span.is_dummy() {
+                        diag.set_span(multispan);
+                    } else {
+                        diag.span_note(multispan, "which is dropped here");
+                    }
+                }
+            }
+        }
+        diag.emit()
     }
 
     fn report_adjustment_infer_error<'mir>(
@@ -55,13 +86,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         // A catch-all error. MIR building usually should just have one `Return` terminator
         // so this usually shouldn't happen.
         let Some(return_bb) = return_bb else {
-            self.tcx
+            self.emit_with_use_site_info(self.tcx
                 .sess
                 .struct_span_err(
                     self.tcx.def_span(instance.def_id()),
                     "cannot infer preemption count adjustment of this function",
-                )
-                .emit();
+                ));
 
             return;
         };
@@ -173,7 +203,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             count += 1;
             diag.span_note(span, msg);
         }
-        diag.emit();
+        self.emit_with_use_site_info(diag);
     }
 
     pub fn infer_adjustment(
@@ -286,10 +316,10 @@ memoize!(
             }
 
             ty::Dynamic(..) => {
-                cx.sess.warn(format!(
+                cx.emit_with_use_site_info(cx.sess.struct_warn(format!(
                     "klint cannot yet check drop of dynamically sized `{}`",
                     PolyDisplay(&poly_ty)
-                ));
+                )));
                 return Ok(0);
             }
 
@@ -321,8 +351,7 @@ memoize!(
                         "because slice can contain variable number of elements, adjustment \
                                for dropping the slice cannot be computed statically",
                     );
-                    // TODO: will be more helpful if we can point to the place of drop
-                    diag.emit();
+                    cx.emit_with_use_site_info(diag);
                 }
                 return Ok(0);
             }
@@ -336,13 +365,14 @@ memoize!(
         let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
             .unwrap()
             .unwrap();
+        let poly_instance = param_env.and(instance);
 
         assert!(matches!(
             instance.def,
             ty::InstanceDef::DropGlue(_, Some(_))
         ));
 
-        if cx.eval_stack.borrow().contains(&instance) {
+        if cx.call_stack.borrow().iter().rev().any(|x| x.instance == poly_instance) {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
                 return Ok(0);
@@ -351,8 +381,6 @@ memoize!(
                 return Err(TooGeneric);
             }
         }
-
-        cx.eval_stack.borrow_mut().push(instance);
 
         let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
         let result = cx.infer_adjustment(param_env, instance, &mir);
@@ -378,7 +406,6 @@ memoize!(
             }
         }
 
-        cx.eval_stack.borrow_mut().pop();
         result
     }
 );
@@ -401,10 +428,10 @@ memoize!(
                     return Ok(adj);
                 }
 
-                cx.sess.span_warn(
+                cx.emit_with_use_site_info(cx.sess.struct_span_warn(
                     cx.def_span(instance.def_id()),
                     "klint cannot yet check indirect function calls without preemption count annotation",
-                );
+                ));
                 return Ok(0);
             }
             _ => (),
@@ -449,7 +476,7 @@ memoize!(
             info!("adjustment {} from annotation", adj);
         }
 
-        if cx.eval_stack.borrow().contains(&instance) {
+        if cx.call_stack.borrow().iter().rev().any(|x| x.instance == poly_instance) {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
                 return Ok(annotation.adjustment.unwrap_or(0));
@@ -458,8 +485,6 @@ memoize!(
                 return Err(TooGeneric);
             }
         }
-
-        cx.eval_stack.borrow_mut().push(instance);
 
         let mir = cx.analysis_instance_mir(instance.def);
         let result = if !annotation.unchecked || annotation.adjustment.is_none() {
@@ -473,7 +498,7 @@ memoize!(
                             format!("function annotated to have preemption count adjustment of {adjustment}"),
                         );
                         diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
-                        diag.emit();
+                        cx.emit_with_use_site_info(diag);
                     }
                     Ok(adjustment)
                 } else {
@@ -510,7 +535,7 @@ memoize!(
                         );
                         diag.note(format!("but the adjustment of this implementing function is {adj}"));
                         diag.span_note(cx.def_span(ancestor_item.def_id), "the trait method is defined here");
-                        diag.emit();
+                        cx.emit_with_use_site_info(diag);
                     }
                 }
             }
@@ -591,7 +616,6 @@ memoize!(
             diag.emit();
         }
 
-        cx.eval_stack.borrow_mut().pop();
         result
     }
 );

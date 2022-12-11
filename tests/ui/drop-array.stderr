@@ -33,9 +33,13 @@ note: reporting preemption count for instance `drop_sleep`
    = note: expectation is inferred to be 0
 
 error: dropping element of array expects the preemption count to be 0
-  |
-  = note: but the possible preemption count when dropping the last element is 1
-  = note: array being dropped is `[SleepAndLockOnDrop; 2]`
+  --> $DIR/drop-array.rs:30:58
+   |
+30 | fn drop_sleep_and_lock(x: Box<[SleepAndLockOnDrop; 2]>) {}
+   |                        - value being dropped is here     ^
+   |
+   = note: but the possible preemption count when dropping the last element is 1
+   = note: array being dropped is `[SleepAndLockOnDrop; 2]`
 
 error: aborting due to previous error
 
