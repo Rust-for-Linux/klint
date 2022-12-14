@@ -303,7 +303,13 @@ memoize!(
             ty::InstanceDef::DropGlue(_, Some(_))
         ));
 
-        if cx.call_stack.borrow().iter().rev().any(|x| x.instance == poly_instance) {
+        if cx
+            .call_stack
+            .borrow()
+            .iter()
+            .rev()
+            .any(|x| x.instance == poly_instance)
+        {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
                 return Ok(ExpectationRange::top());
@@ -413,7 +419,13 @@ memoize!(
             info!("expectation {} from annotation", exp);
         }
 
-        if cx.call_stack.borrow().iter().rev().any(|x| x.instance == poly_instance) {
+        if cx
+            .call_stack
+            .borrow()
+            .iter()
+            .rev()
+            .any(|x| x.instance == poly_instance)
+        {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
                 return Ok(annotation.expectation.unwrap_or_else(ExpectationRange::top));

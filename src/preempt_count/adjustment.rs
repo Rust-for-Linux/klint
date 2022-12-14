@@ -372,7 +372,13 @@ memoize!(
             ty::InstanceDef::DropGlue(_, Some(_))
         ));
 
-        if cx.call_stack.borrow().iter().rev().any(|x| x.instance == poly_instance) {
+        if cx
+            .call_stack
+            .borrow()
+            .iter()
+            .rev()
+            .any(|x| x.instance == poly_instance)
+        {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
                 return Ok(0);
@@ -476,7 +482,13 @@ memoize!(
             info!("adjustment {} from annotation", adj);
         }
 
-        if cx.call_stack.borrow().iter().rev().any(|x| x.instance == poly_instance) {
+        if cx
+            .call_stack
+            .borrow()
+            .iter()
+            .rev()
+            .any(|x| x.instance == poly_instance)
+        {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
                 return Ok(annotation.adjustment.unwrap_or(0));

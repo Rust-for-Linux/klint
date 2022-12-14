@@ -3,7 +3,7 @@ pub mod annotation;
 pub mod dataflow;
 pub mod expectation;
 
-use rustc_middle::ty::{ParamEnvAnd, Instance};
+use rustc_middle::ty::{Instance, ParamEnvAnd};
 use rustc_mir_dataflow::lattice::MeetSemiLattice;
 use rustc_span::Span;
 
