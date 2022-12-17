@@ -547,10 +547,12 @@ memoize!(
                         "this function is recursive but preemption count expectation is not 0..",
                     );
                     diag.note(format!("expectation is inferred to be {}", exp));
-                    diag.note(format!(
-                        "instance being checked is `{}`",
-                        PolyDisplay(&poly_instance)
-                    ));
+                    if !generic {
+                        diag.note(format!(
+                            "instance being checked is `{}`",
+                            PolyDisplay(&poly_instance)
+                        ));
+                    }
                     diag.help(format!(
                         "try annotate the function with `#[klint::preempt_count(expect = {exp})]`"
                     ));

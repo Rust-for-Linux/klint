@@ -598,10 +598,12 @@ memoize!(
                         "this function is recursive but preemption count adjustment is not 0",
                     );
                     diag.note(format!("adjustment is inferred to be {}", adj));
-                    diag.note(format!(
-                        "instance being checked is `{}`",
-                        PolyDisplay(&poly_instance)
-                    ));
+                    if !generic {
+                        diag.note(format!(
+                            "instance being checked is `{}`",
+                            PolyDisplay(&poly_instance)
+                        ));
+                    }
                     diag.help(format!(
                         "try annotate the function with `#[klint::preempt_count(adjust = {adj})]`"
                     ));
