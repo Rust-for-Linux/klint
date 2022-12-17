@@ -55,7 +55,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                             // This also avoids `TooGeneric` when def_id is an trait method.
                             v
                         } else {
-                            let instance =
+                            let callee_instance =
                                 ty::Instance::resolve(self.tcx, param_env, def_id, substs)
                                     .unwrap()
                                     .ok_or(TooGeneric)?;
@@ -63,7 +63,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                                 instance: param_env.and(instance),
                                 kind: UseSiteKind::Call(data.terminator().source_info.span),
                             });
-                            let result = self.instance_expectation(param_env.and(instance));
+                            let result = self.instance_expectation(param_env.and(callee_instance));
                             self.call_stack.borrow_mut().pop();
                             result?
                         }
@@ -153,7 +153,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 }
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)))]
+    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)), ret)]
     fn drop_expectation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
@@ -352,7 +352,7 @@ memoize!(
 );
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)))]
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)), ret)]
     pub fn instance_expectation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,

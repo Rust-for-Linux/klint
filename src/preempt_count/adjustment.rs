@@ -259,7 +259,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 }
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)))]
+    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)), ret)]
     pub fn drop_adjustment<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
