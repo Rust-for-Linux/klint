@@ -12,16 +12,12 @@ use super::*;
 use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
-    fn drop_adjustment_overflow(
-        &self,
-        poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
-    ) -> Result<i32, TooGeneric> {
+    fn drop_adjustment_overflow(&self, poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>) -> Result<!, Error> {
         let diag = self.sess.struct_err(format!(
             "preemption count overflow when trying to compute adjustment of type `{}",
             PolyDisplay(&poly_ty)
         ));
-        self.emit_with_use_site_info(diag);
-        return Ok(0);
+        Err(Error::Error(self.emit_with_use_site_info(diag)))
     }
 
     fn poly_instance_of_def_id(&self, def_id: DefId) -> ParamEnvAnd<'tcx, Instance<'tcx>> {
@@ -76,7 +72,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             'tcx,
             AdjustmentComputation<'mir, 'tcx, '_>,
         >,
-    ) {
+    ) -> ErrorGuaranteed {
         // First step, see if there are any path that leads to a `return` statement have `Top` directly.
         let mut return_bb = None;
         for (b, data) in rustc_middle::mir::traversal::reachable(body) {
@@ -99,14 +95,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         // A catch-all error. MIR building usually should just have one `Return` terminator
         // so this usually shouldn't happen.
         let Some(return_bb) = return_bb else {
-            self.emit_with_use_site_info(self.tcx
+            return self.emit_with_use_site_info(self.tcx
                 .sess
                 .struct_span_err(
                     self.tcx.def_span(instance.def_id()),
                     "cannot infer preemption count adjustment of this function",
                 ));
-
-            return;
         };
 
         // Find the deepest single-value block in the dominator tree.
@@ -216,7 +210,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             count += 1;
             diag.span_note(span, msg);
         }
-        self.emit_with_use_site_info(diag);
+        self.emit_with_use_site_info(diag)
     }
 
     pub fn infer_adjustment(
@@ -224,7 +218,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
         body: &Body<'tcx>,
-    ) -> Result<i32, TooGeneric> {
+    ) -> Result<i32, Error> {
         if false {
             rustc_middle::mir::pretty::write_mir_fn(
                 self.tcx,
@@ -263,8 +257,11 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         } else if let Some(v) = adjustment.is_single_value() {
             v
         } else {
-            self.report_adjustment_infer_error(instance, body, &mut analysis_result);
-            0
+            return Err(Error::Error(self.report_adjustment_infer_error(
+                instance,
+                body,
+                &mut analysis_result,
+            )));
         };
 
         Ok(adjustment)
@@ -276,7 +273,7 @@ memoize!(
     pub fn drop_adjustment<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
-    ) -> Result<i32, TooGeneric> {
+    ) -> Result<i32, Error> {
         let (param_env, ty) = poly_ty.into_parts();
 
         // If the type doesn't need drop, then there is trivially no adjustment.
@@ -296,7 +293,7 @@ memoize!(
                 let mut adj = 0i32;
                 for elem_ty in list.iter() {
                     let elem_adj = cx.drop_adjustment(param_env.and(elem_ty))?;
-                    let Some(new_adj) = adj.checked_add(elem_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
+                    let Some(new_adj) = adj.checked_add(elem_adj) else { cx.drop_adjustment_overflow(poly_ty)? };
                     adj = new_adj;
                 }
                 return Ok(adj);
@@ -307,7 +304,7 @@ memoize!(
                 let box_free = cx.require_lang_item(LangItem::BoxFree, None);
                 let box_free_adj =
                     cx.instance_adjustment(param_env.and(Instance::new(box_free, substs)))?;
-                let Some(adj) = adj.checked_add(box_free_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
+                let Some(adj) = adj.checked_add(box_free_adj) else { cx.drop_adjustment_overflow(poly_ty)? };
                 return Ok(adj);
             }
 
@@ -319,8 +316,9 @@ memoize!(
                     cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
                 let poly_poly_ty = poly_param_env.and(cx.tcx.mk_ty(ty::Adt(*def, poly_substs)));
                 if poly_poly_ty != poly_ty {
-                    if let Ok(adjustment) = cx.drop_adjustment(poly_poly_ty) {
-                        return Ok(adjustment);
+                    match cx.drop_adjustment(poly_poly_ty) {
+                        Err(Error::TooGeneric) => (),
+                        adjustment => return adjustment,
                     }
                 }
 
@@ -337,7 +335,9 @@ memoize!(
             }
 
             ty::Array(elem_ty, size) => {
-                let size = size.try_eval_usize(cx.tcx, param_env).ok_or(TooGeneric);
+                let size = size
+                    .try_eval_usize(cx.tcx, param_env)
+                    .ok_or(Error::TooGeneric);
                 if size == Ok(0) {
                     return Ok(0);
                 }
@@ -345,8 +345,8 @@ memoize!(
                 if elem_adj == 0 {
                     return Ok(0);
                 }
-                let Ok(size) = i32::try_from(size?) else { return cx.drop_adjustment_overflow(poly_ty); };
-                let Some(adj) = size.checked_mul(elem_adj) else { return cx.drop_adjustment_overflow(poly_ty); };
+                let Ok(size) = i32::try_from(size?) else { cx.drop_adjustment_overflow(poly_ty)? };
+                let Some(adj) = size.checked_mul(elem_adj) else { cx.drop_adjustment_overflow(poly_ty)? };
                 return Ok(adj);
             }
 
@@ -364,12 +364,12 @@ memoize!(
                         "because slice can contain variable number of elements, adjustment \
                                for dropping the slice cannot be computed statically",
                     );
-                    cx.emit_with_use_site_info(diag);
+                    return Err(Error::Error(cx.emit_with_use_site_info(diag)));
                 }
                 return Ok(0);
             }
 
-            _ => return Err(TooGeneric),
+            _ => return Err(Error::TooGeneric),
         }
 
         // Do not call `resolve_drop_in_place` because we need param_env.
@@ -397,7 +397,7 @@ memoize!(
                 return Ok(0);
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
-                return Err(TooGeneric);
+                return Err(Error::TooGeneric);
             }
         }
 
@@ -407,6 +407,9 @@ memoize!(
         // Recursion encountered.
         if let Some(&recur) = cx.query_cache::<drop_adjustment>().borrow().get(&poly_ty) {
             match (result, recur) {
+                (_, Err(Error::Error(_))) => bug!("recursive callee errors"),
+                // Error already reported.
+                (Err(Error::Error(_)), _) => (),
                 (Err(_), Err(_)) => (),
                 (Ok(a), Ok(b)) if a == b => (),
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
@@ -434,7 +437,7 @@ memoize!(
     pub fn instance_adjustment<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
-    ) -> Result<i32, TooGeneric> {
+    ) -> Result<i32, Error> {
         let (param_env, instance) = poly_instance.into_parts();
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
@@ -467,8 +470,9 @@ memoize!(
                 poly_param_env.and(Instance::new(instance.def_id(), poly_substs));
             generic = poly_poly_instance == poly_instance;
             if !generic {
-                if let Ok(v) = cx.instance_adjustment(poly_poly_instance) {
-                    return Ok(v);
+                match cx.instance_adjustment(poly_poly_instance) {
+                    Err(Error::TooGeneric) => (),
+                    adjustment => return adjustment,
                 }
             }
         }
@@ -507,7 +511,7 @@ memoize!(
                 return Ok(annotation.adjustment.unwrap_or(0));
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
-                return Err(TooGeneric);
+                return Err(Error::TooGeneric);
             }
         }
 
@@ -598,6 +602,9 @@ memoize!(
             .get(&poly_instance)
         {
             match (result, recur) {
+                (_, Err(Error::Error(_))) => bug!("recursive callee errors"),
+                // Error already reported.
+                (Err(Error::Error(_)), _) => (),
                 (Err(_), Err(_)) => (),
                 (Ok(a), Ok(b)) if a == b => (),
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),

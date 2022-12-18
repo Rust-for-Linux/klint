@@ -6,7 +6,7 @@ use rustc_session::{declare_tool_lint, impl_lint_pass};
 use rustc_span::Span;
 
 use crate::ctxt::AnalysisCtxt;
-use crate::preempt_count::ExpectationRange;
+use crate::preempt_count::*;
 
 // A description of how atomic context analysis works.
 //
@@ -348,12 +348,12 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         for mono_item in mono_items {
             if let MonoItem::Fn(instance) = mono_item {
                 let param_and_instance = ParamEnv::reveal_all().and(instance);
-                self.cx
-                    .instance_adjustment(param_and_instance)
-                    .expect("monomorphized function should not be too generic");
-                self.cx
-                    .instance_expectation(param_and_instance)
-                    .expect("monomorphized function should not be too generic");
+                if let Err(Error::TooGeneric) = self.cx.instance_adjustment(param_and_instance) {
+                    bug!("monomorphized function should not be too generic");
+                }
+                if let Err(Error::TooGeneric) = self.cx.instance_expectation(param_and_instance) {
+                    bug!("monomorphized function should not be too generic");
+                }
             }
         }
 

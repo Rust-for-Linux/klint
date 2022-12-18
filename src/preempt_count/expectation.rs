@@ -16,7 +16,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
         body: &Body<'tcx>,
-    ) -> Result<ExpectationRange, TooGeneric> {
+    ) -> Result<ExpectationRange, Error> {
         if false {
             rustc_middle::mir::pretty::write_mir_fn(
                 self.tcx,
@@ -58,7 +58,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                             let callee_instance =
                                 ty::Instance::resolve(self.tcx, param_env, def_id, substs)
                                     .unwrap()
-                                    .ok_or(TooGeneric)?;
+                                    .ok_or(Error::TooGeneric)?;
                             self.call_stack.borrow_mut().push(UseSite {
                                 instance: param_env.and(instance),
                                 kind: UseSiteKind::Call(data.terminator().source_info.span),
@@ -136,13 +136,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     "but the possible preemption count at this point is {}",
                     expectation_infer + adjustment
                 ));
-                self.emit_with_use_site_info(diag);
-
-                // For failed inference, revert to the default.
-                expectation_infer = ExpectationRange::top();
 
                 // Stop processing other calls in this function to avoid generating too many errors.
-                break;
+                return Err(Error::Error(self.emit_with_use_site_info(diag)));
             }
 
             expectation_infer = expected;
@@ -157,7 +153,7 @@ memoize!(
     fn drop_expectation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
-    ) -> Result<ExpectationRange, TooGeneric> {
+    ) -> Result<ExpectationRange, Error> {
         let (param_env, ty) = poly_ty.into_parts();
 
         // If the type doesn't need drop, then there is trivially no expectation.
@@ -201,10 +197,7 @@ memoize!(
                         exp + adj_bound
                     ));
                     diag.note(format!("content being dropped is `{}`", substs.type_at(0)));
-                    cx.emit_with_use_site_info(diag);
-
-                    // For failed inference, revert to the default.
-                    expected = ExpectationRange::top();
+                    return Err(Error::Error(cx.emit_with_use_site_info(diag)));
                 }
 
                 return Ok(expected);
@@ -218,8 +211,9 @@ memoize!(
                     cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
                 let poly_poly_ty = poly_param_env.and(cx.tcx.mk_ty(ty::Adt(*def, poly_substs)));
                 if poly_poly_ty != poly_ty {
-                    if let Ok(expectation) = cx.drop_expectation(poly_poly_ty) {
-                        return Ok(expectation);
+                    match cx.drop_expectation(poly_poly_ty) {
+                        Err(Error::TooGeneric) => (),
+                        expectation => return expectation,
                     }
                 }
 
@@ -236,7 +230,9 @@ memoize!(
             }
 
             ty::Array(elem_ty, size) => {
-                let size = size.try_eval_usize(cx.tcx, param_env).ok_or(TooGeneric);
+                let size = size
+                    .try_eval_usize(cx.tcx, param_env)
+                    .ok_or(Error::TooGeneric);
                 if size == Ok(0) {
                     return Ok(ExpectationRange::top());
                 }
@@ -272,10 +268,7 @@ memoize!(
                         elem_exp + last_adj_bound
                     ));
                     diag.note(format!("array being dropped is `{}`", ty));
-                    cx.emit_with_use_site_info(diag);
-
-                    // For failed inference, revert to the default.
-                    expected = ExpectationRange::top();
+                    return Err(Error::Error(cx.emit_with_use_site_info(diag)));
                 }
 
                 return Ok(expected);
@@ -287,7 +280,7 @@ memoize!(
                 return cx.drop_expectation(param_env.and(*elem_ty));
             }
 
-            _ => return Err(TooGeneric),
+            _ => return Err(Error::TooGeneric),
         }
 
         // Do not call `resolve_drop_in_place` because we need param_env.
@@ -315,7 +308,7 @@ memoize!(
                 return Ok(ExpectationRange::top());
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
-                return Err(TooGeneric);
+                return Err(Error::TooGeneric);
             }
         }
 
@@ -325,6 +318,9 @@ memoize!(
         // Recursion encountered.
         if let Some(&recur) = cx.query_cache::<drop_expectation>().borrow().get(&poly_ty) {
             match (result, recur) {
+                (_, Err(Error::Error(_))) => bug!("recursive callee errors"),
+                // Error already reported.
+                (Err(Error::Error(_)), _) => (),
                 (Err(_), Err(_)) => (),
                 (Ok(a), Ok(b)) if a == b => (),
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
@@ -356,7 +352,7 @@ memoize!(
     pub fn instance_expectation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
-    ) -> Result<ExpectationRange, TooGeneric> {
+    ) -> Result<ExpectationRange, Error> {
         let (param_env, instance) = poly_instance.into_parts();
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
@@ -391,8 +387,9 @@ memoize!(
                 poly_param_env.and(Instance::new(instance.def_id(), poly_substs));
             generic = poly_poly_instance == poly_instance;
             if !generic {
-                if let Ok(v) = cx.instance_expectation(poly_poly_instance) {
-                    return Ok(v);
+                match cx.instance_expectation(poly_poly_instance) {
+                    Err(Error::TooGeneric) => (),
+                    expectation => return expectation,
                 }
             }
         }
@@ -431,7 +428,7 @@ memoize!(
                 return Ok(annotation.expectation.unwrap_or_else(ExpectationRange::top));
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
-                return Err(TooGeneric);
+                return Err(Error::TooGeneric);
             }
         }
 
@@ -534,6 +531,9 @@ memoize!(
             .get(&poly_instance)
         {
             match (result, recur) {
+                (_, Err(Error::Error(_))) => bug!("recursive callee errors"),
+                // Error already reported.
+                (Err(Error::Error(_)), _) => (),
                 (Err(_), Err(_)) => (),
                 (Ok(a), Ok(b)) if a == *b => (),
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),

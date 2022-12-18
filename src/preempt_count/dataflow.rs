@@ -142,8 +142,7 @@ impl JoinSemiLattice for AdjustmentBounds {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AdjustmentBoundsOrError {
     Bounds(AdjustmentBounds),
-    TooGeneric,
-    Error,
+    Error(Error),
 }
 
 impl AdjustmentBoundsOrError {
@@ -155,11 +154,10 @@ impl AdjustmentBoundsOrError {
         }
     }
 
-    pub fn into_result(self) -> Result<AdjustmentBounds, TooGeneric> {
+    pub fn into_result(self) -> Result<AdjustmentBounds, Error> {
         match self {
             AdjustmentBoundsOrError::Bounds(b) => Ok(b),
-            AdjustmentBoundsOrError::TooGeneric => Err(TooGeneric),
-            AdjustmentBoundsOrError::Error => unreachable!(),
+            AdjustmentBoundsOrError::Error(e) => Err(e),
         }
     }
 }
@@ -173,14 +171,14 @@ impl Default for AdjustmentBoundsOrError {
 impl JoinSemiLattice for AdjustmentBoundsOrError {
     fn join(&mut self, other: &Self) -> bool {
         match (self, other) {
-            (AdjustmentBoundsOrError::Error, _) => false,
-            (this, AdjustmentBoundsOrError::Error) => {
-                *this = AdjustmentBoundsOrError::Error;
+            (AdjustmentBoundsOrError::Error(Error::Error(_)), _) => false,
+            (this, AdjustmentBoundsOrError::Error(Error::Error(e))) => {
+                *this = AdjustmentBoundsOrError::Error(Error::Error(*e));
                 true
             }
-            (AdjustmentBoundsOrError::TooGeneric, _) => false,
-            (this, AdjustmentBoundsOrError::TooGeneric) => {
-                *this = AdjustmentBoundsOrError::TooGeneric;
+            (AdjustmentBoundsOrError::Error(Error::TooGeneric), _) => false,
+            (this, AdjustmentBoundsOrError::Error(Error::TooGeneric)) => {
+                *this = AdjustmentBoundsOrError::Error(Error::TooGeneric);
                 true
             }
             (AdjustmentBoundsOrError::Bounds(a), AdjustmentBoundsOrError::Bounds(b)) => a.join(b),
@@ -272,7 +270,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                                 self.checker.call_stack.borrow_mut().pop();
                                 result
                             }
-                            None => Err(TooGeneric),
+                            None => Err(Error::TooGeneric),
                         }
                     }
                 } else {
@@ -306,10 +304,13 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
             _ => return,
         };
 
-        let Ok(adjustment) = adjustment else {
-            // Too generic, need to bail out and retry after monomorphization.
-            *state = AdjustmentBoundsOrError::TooGeneric;
-            return;
+        let adjustment = match adjustment {
+            Ok(v) => v,
+            Err(e) => {
+                // Too generic, need to bail out and retry after monomorphization.
+                *state = AdjustmentBoundsOrError::Error(e);
+                return;
+            }
         };
 
         *bounds = bounds.offset(adjustment);
