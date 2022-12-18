@@ -144,6 +144,7 @@ impl std::ops::Sub<AdjustmentBounds> for ExpectationRange {
     }
 }
 
+#[derive(Debug)]
 pub enum UseSiteKind {
     Call(Span),
     Drop {
@@ -154,6 +155,7 @@ pub enum UseSiteKind {
     },
 }
 
+#[derive(Debug)]
 pub struct UseSite<'tcx> {
     pub instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
     pub kind: UseSiteKind,

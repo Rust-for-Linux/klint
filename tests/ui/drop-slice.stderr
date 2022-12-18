@@ -1,4 +1,3 @@
-WARN klint::ctxt no klint metadata found for crate core
 error: dropping element of slice causes non-zero preemption count adjustment
   --> $DIR/drop-slice.rs:17:37
    |

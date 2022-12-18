@@ -46,9 +46,9 @@ mod attribute;
 mod infallible_allocation;
 mod mir;
 mod monomorphize_collector;
+mod preempt_count;
 mod serde;
 mod symbol;
-mod preempt_count;
 mod util;
 
 rustc_session::declare_tool_lint! {

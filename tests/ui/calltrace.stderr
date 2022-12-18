@@ -1,0 +1,23 @@
+WARN klint::ctxt no klint metadata found for crate core
+WARN klint::ctxt no klint metadata found for crate alloc
+error: this call expects the preemption count to be 0
+  --> $DIR/calltrace.rs:15:5
+   |
+15 |     might_sleep();
+   |     ^^^^^^^^^^^^^
+   |
+   = note: but the possible preemption count at this point is 1..
+note: which is called from here
+  --> $DIR/calltrace.rs:19:5
+   |
+19 |     problematic(x);
+   |     ^^^^^^^^^^^^^^
+   = note: instance being checked is `wrapper::<LockOnDrop>`
+note: which is called from here
+  --> $DIR/calltrace.rs:27:5
+   |
+27 |     wrapper(LockOnDrop);
+   |     ^^^^^^^^^^^^^^^^^^^
+
+error: aborting due to previous error
+

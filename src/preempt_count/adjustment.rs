@@ -1,5 +1,5 @@
 use rustc_errors::{DiagnosticBuilder, EmissionGuarantee, MultiSpan};
-use rustc_hir::def_id::CrateNum;
+use rustc_hir::def_id::{CrateNum, DefId};
 use rustc_hir::{Constness, LangItem};
 use rustc_index::bit_set::BitSet;
 use rustc_middle::mir::{Body, TerminatorKind};
@@ -24,6 +24,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         return Ok(0);
     }
 
+    fn poly_instance_of_def_id(&self, def_id: DefId) -> ParamEnvAnd<'tcx, Instance<'tcx>> {
+        let poly_param_env = self.param_env_reveal_all_normalized(def_id);
+        let poly_substs = self.erase_regions(InternalSubsts::identity_for_item(self.tcx, def_id));
+        poly_param_env.and(Instance::new(def_id, poly_substs))
+    }
+
     pub fn emit_with_use_site_info<G: EmissionGuarantee>(
         &self,
         mut diag: DiagnosticBuilder<'tcx, G>,
@@ -35,6 +41,13 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         diag.set_span(*span);
                     } else {
                         diag.span_note(*span, "which is called from here");
+                    }
+                    let def_id = site.instance.value.def_id();
+                    if self.poly_instance_of_def_id(def_id) != site.instance {
+                        diag.note(format!(
+                            "instance being checked is `{}`",
+                            PolyDisplay(&site.instance)
+                        ));
                     }
                 }
                 UseSiteKind::Drop {
