@@ -85,23 +85,32 @@ declare_tool_lint! {
 
 impl<'tcx> AnalysisCtxt<'tcx> {
     pub fn ffi_property(&self, instance: Instance<'tcx>) -> FunctionContextProperty {
-        let symbol = self.symbol_name(instance).name;
+        let mut symbol = self.symbol_name(instance).name;
 
         // Skip LLVM intrinsics
         if symbol.starts_with("llvm.") {
             return Default::default();
         }
 
+        // Skip helpers.
+        if symbol.starts_with("rust_helper_") {
+            symbol = &symbol["rust_helper_".len()..];
+        }
+
         match symbol {
             // Interfacing between libcore and panic runtime
             "rust_begin_unwind" => Default::default(),
             // Basic string operations depended by libcore.
-            "memcmp" | "strlen" => Default::default(),
+            "memcmp" | "strlen" | "memchr" => Default::default(),
 
             // Memory allocations glues depended by liballoc.
             // Allocation functions may sleep.
-            "__rust_alloc" | "__rust_alloc_zeroed" | "__rust_realloc" |
-            "__rg_alloc" | "__rg_alloc_zeroed" | "__rg_realloc" => FunctionContextProperty {
+            "__rust_alloc"
+            | "__rust_alloc_zeroed"
+            | "__rust_realloc"
+            | "__rg_alloc"
+            | "__rg_alloc_zeroed"
+            | "__rg_realloc" => FunctionContextProperty {
                 expectation: ExpectationRange::single_value(0),
                 adjustment: 0,
             },
@@ -109,14 +118,91 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // Deallocation function will not sleep.
             "__rust_dealloc" | "__rg_dealloc" => Default::default(),
 
-            "spin_lock" => FunctionContextProperty {
-                expectation: ExpectationRange::top(),
-                adjustment: 1,
+            // What krealloc does depend on flags. Assume it may sleep for conservative purpose.
+            "krealloc" => FunctionContextProperty {
+                expectation: ExpectationRange::single_value(0),
+                adjustment: 0,
             },
-            "spin_unlock" => FunctionContextProperty {
+            "kfree" => Default::default(),
+
+            // Error helpers.
+            "IS_ERR" | "PTR_ERR" | "errname" => Default::default(),
+
+            // Refcount helpers.
+            "REFCOUNT_INIT" | "refcount_inc" | "refcount_dec_and_test" => Default::default(),
+
+            // Printk can be called from any context.
+            "_printk" | "_dev_printk" | "BUG" => Default::default(),
+
+            "ioremap" | "iounmap" => FunctionContextProperty {
+                expectation: ExpectationRange::single_value(0),
+                adjustment: 0,
+            },
+
+            // I/O functions do not sleep.
+            "readb" | "readw" | "readl" | "readq" | "readb_relaxed" | "readw_relaxed"
+            | "readl_relaxed" | "readq_relaxed" | "writeb" | "writew" | "writel" | "writeq"
+            | "writeb_relaxed" | "writew_relaxed" | "writel_relaxed" | "writeq_relaxed"
+            | "memcpy_fromio" => FunctionContextProperty {
+                expectation: ExpectationRange::top(),
+                adjustment: 0,
+            },
+
+            // `init_module` and `cleanup_module` exposed from Rust modules are allowed to sleep.
+            "init_module" | "cleanup_module" => FunctionContextProperty {
+                expectation: ExpectationRange::single_value(0),
+                adjustment: 0,
+            },
+
+            "wait_for_random_bytes" => FunctionContextProperty {
+                expectation: ExpectationRange::single_value(0),
+                adjustment: 0,
+            },
+
+            // Userspace memory access might fault, and thus sleep.
+            "copy_from_user" | "copy_to_user" | "clear_user" => FunctionContextProperty {
+                expectation: ExpectationRange::single_value(0),
+                adjustment: 0,
+            },
+
+            // Spinlock functions.
+            "__spin_lock_init" | "_raw_spin_lock_init" => Default::default(),
+            "spin_lock" | "spin_lock_irqsave" | "raw_spin_lock" | "raw_spin_lock_irqsave" => {
+                FunctionContextProperty {
+                    expectation: ExpectationRange::top(),
+                    adjustment: 1,
+                }
+            }
+            "spin_unlock"
+            | "spin_unlock_irqrestore"
+            | "raw_spin_unlock"
+            | "raw_spin_unlock_irqrestore" => FunctionContextProperty {
                 expectation: ExpectationRange { lo: 1, hi: None },
                 adjustment: -1,
             },
+
+            // Mutex functions.
+            "__init_rwsem" | "__mutex_init" => Default::default(),
+            "down_read" | "down_write" | "mutex_lock" => FunctionContextProperty {
+                expectation: ExpectationRange::single_value(0),
+                adjustment: 0,
+            },
+            "up_read" | "up_write" | "mutex_unlock" => Default::default(),
+
+            // RCU
+            "rcu_read_lock" => FunctionContextProperty {
+                expectation: ExpectationRange::top(),
+                adjustment: 1,
+            },
+            "rcu_read_unlock" => FunctionContextProperty {
+                expectation: ExpectationRange { lo: 1, hi: None },
+                adjustment: -1,
+            },
+            "synchronize_rcu" => FunctionContextProperty {
+                expectation: ExpectationRange::single_value(0),
+                adjustment: 0,
+            },
+
             "__cant_sleep" => FunctionContextProperty {
                 expectation: ExpectationRange { lo: 1, hi: None },
                 adjustment: 0,
