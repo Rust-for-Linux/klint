@@ -1,4 +1,7 @@
+use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{CrateNum, DefId, DefIndex};
+use rustc_hir::definitions::DefPathData;
+use rustc_span::sym;
 
 use crate::attribute::PreemptionCount;
 use crate::ctxt::AnalysisCtxt;
@@ -17,6 +20,77 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         }
         Default::default()
     }
+
+    fn core_out_of_band_annotation(&self, def_id: DefId) -> PreemptionCount {
+        if self.def_kind(def_id) == DefKind::AssocFn &&
+            let Some(impl_) = self.impl_of_method(def_id)
+        {
+            let self_ty = self.type_of(impl_);
+            let Some(fn_name) = self.def_path(def_id).data.last().copied() else {
+                return Default::default();
+            };
+            let DefPathData::ValueNs(fn_name) = fn_name.data else {
+                return Default::default();
+            };
+
+            if let Some(adt_def) = self_ty.ty_adt_def() &&
+                let data = self.def_path(adt_def.did()).data &&
+                data.len() == 3 &&
+                let DefPathData::TypeNs(task) = data[0].data &&
+                task == sym::task &&
+                let DefPathData::TypeNs(wake) = data[1].data &&
+                wake == *crate::symbol::wake &&
+                let DefPathData::TypeNs(waker) = data[2].data &&
+                waker == *crate::symbol::Waker
+            {
+                if fn_name == sym::drop
+                    || fn_name == sym::clone
+                    || fn_name == *crate::symbol::wake
+                    || fn_name == *crate::symbol::wake_by_ref
+                {
+                    return PreemptionCount {
+                        adjustment: Some(0),
+                        expectation: Some(super::ExpectationRange::top()),
+                        unchecked: true,
+                    };
+                }
+            }
+
+            return Default::default();
+        }
+
+        let data = self.def_path(def_id).data;
+        if data.len() == 3 &&
+            let DefPathData::TypeNs(fmt) = data[0].data &&
+            fmt == sym::fmt &&
+            let DefPathData::TypeNs(_fmt_trait) = data[1].data &&
+            let DefPathData::ValueNs(fmt_fn) = data[2].data &&
+            fmt_fn == sym::fmt
+        {
+            // This is a `core::fmt::Trait::fmt` function.
+            return PreemptionCount {
+                adjustment: Some(0),
+                expectation: Some(super::ExpectationRange::top()),
+                unchecked: false,
+            };
+        }
+        if data.len() == 3 &&
+            let DefPathData::TypeNs(fmt) = data[0].data &&
+            fmt == sym::fmt &&
+            let DefPathData::TypeNs(write) = data[1].data &&
+            write == *crate::symbol::Write &&
+            let DefPathData::ValueNs(_write_fn) = data[2].data
+        {
+            // This is a `core::fmt::Write::write_{str, char, fmt}` function.
+            return PreemptionCount {
+                adjustment: Some(0),
+                expectation: Some(super::ExpectationRange::top()),
+                unchecked: false,
+            };
+        }
+
+        Default::default()
+    }
 }
 
 memoize!(
@@ -24,6 +98,10 @@ memoize!(
         cx: &AnalysisCtxt<'tcx>,
         def_id: DefId,
     ) -> PreemptionCount {
+        if cx.crate_name(def_id.krate) == sym::core {
+            return cx.core_out_of_band_annotation(def_id);
+        }
+
         let Some(local_def_id) = def_id.as_local() else {
             if let Some(v) = cx.sql_load::<preemption_count_annotation>(def_id) {
                 return v;

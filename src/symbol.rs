@@ -16,4 +16,8 @@ def! {
     adjust,
     expect,
     unchecked,
+    Write,
+    Waker,
+    wake,
+    wake_by_ref,
 }

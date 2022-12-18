@@ -42,13 +42,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     } else {
                         diag.span_note(*span, "which is called from here");
                     }
-                    let def_id = site.instance.value.def_id();
-                    if self.poly_instance_of_def_id(def_id) != site.instance {
-                        diag.note(format!(
-                            "instance being checked is `{}`",
-                            PolyDisplay(&site.instance)
-                        ));
-                    }
                 }
                 UseSiteKind::Drop {
                     drop_span,
@@ -62,6 +55,13 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         diag.span_note(multispan, "which is dropped here");
                     }
                 }
+            }
+            let def_id = site.instance.value.def_id();
+            if self.poly_instance_of_def_id(def_id) != site.instance {
+                diag.note(format!(
+                    "instance being checked is `{}`",
+                    PolyDisplay(&site.instance)
+                ));
             }
         }
         diag.emit()
