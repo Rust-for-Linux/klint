@@ -438,9 +438,7 @@ memoize!(
             if let Ok(expectation_infer) = infer_result {
                 // Check if the inferred expectation matches the annotation.
                 if let Some(expectation) = annotation.expectation {
-                    let mut expectation_intersect = expectation_infer;
-                    expectation_intersect.meet(&expectation);
-                    if expectation_intersect != expectation {
+                    if !expectation_infer.contains_range(expectation) {
                         let mut diag = cx.sess.struct_span_err(
                             cx.def_span(instance.def_id()),
                             format!(
@@ -481,9 +479,7 @@ memoize!(
             for ancestor in trait_def.ancestors(cx.tcx, impl_).unwrap() {
                 let Some(ancestor_item) = ancestor.item(cx.tcx, trait_item) else { continue };
                 if let Some(ancestor_exp) = cx.preemption_count_annotation(ancestor_item.def_id).expectation {
-                    let mut expectation_intersect = exp;
-                    expectation_intersect.meet(&ancestor_exp);
-                    if expectation_intersect != ancestor_exp {
+                    if !exp.contains_range(ancestor_exp) {
                         let mut diag = cx.sess.struct_span_err(
                             cx.def_span(instance.def_id()),
                             format!("trait method annotated to have preemption count expectation of {ancestor_exp}"),
@@ -506,9 +502,7 @@ memoize!(
             let ffi_property = cx.ffi_property(instance);
 
             // Check using the intersection -- the FFI property is allowed to be more restrictive.
-            let mut expectation_intersect = exp;
-            expectation_intersect.meet(&ffi_property.1);
-            if expectation_intersect != ffi_property.1 {
+            if !exp.contains_range(ffi_property.1) {
                 let mut diag = cx.sess.struct_span_err(
                     cx.def_span(instance.def_id()),
                     format!(

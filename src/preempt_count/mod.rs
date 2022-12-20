@@ -69,6 +69,10 @@ impl ExpectationRange {
             false
         }
     }
+
+    pub fn contains_range(&self, mut other: Self) -> bool {
+        !other.meet(self)
+    }
 }
 
 impl MeetSemiLattice for ExpectationRange {
