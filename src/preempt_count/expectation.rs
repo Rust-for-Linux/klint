@@ -395,7 +395,7 @@ memoize!(
         }
 
         if cx.is_foreign_item(instance.def_id()) {
-            return Ok(cx.ffi_property(instance).expectation);
+            return Ok(cx.ffi_property(instance).1);
         }
 
         if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
@@ -507,14 +507,14 @@ memoize!(
 
             // Check using the intersection -- the FFI property is allowed to be more restrictive.
             let mut expectation_intersect = exp;
-            expectation_intersect.meet(&ffi_property.expectation);
-            if expectation_intersect != ffi_property.expectation {
+            expectation_intersect.meet(&ffi_property.1);
+            if expectation_intersect != ffi_property.1 {
                 let mut diag = cx.sess.struct_span_err(
                     cx.def_span(instance.def_id()),
                     format!(
                         "extern function `{}` must have preemption count expectation {}",
                         cx.def_path_str(instance.def_id()),
-                        ffi_property.expectation,
+                        ffi_property.1,
                     ),
                 );
                 diag.note(format!(

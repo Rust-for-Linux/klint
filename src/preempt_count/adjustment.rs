@@ -478,7 +478,7 @@ memoize!(
         }
 
         if cx.is_foreign_item(instance.def_id()) {
-            return Ok(cx.ffi_property(instance).adjustment);
+            return Ok(cx.ffi_property(instance).0);
         }
 
         if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
@@ -579,13 +579,13 @@ memoize!(
             // Verify that the inferred result is compatible with the FFI list.
             let ffi_property = cx.ffi_property(instance);
 
-            if adj != ffi_property.adjustment {
+            if adj != ffi_property.0 {
                 let mut diag = cx.tcx.sess.struct_span_err(
                     cx.def_span(instance.def_id()),
                     format!(
                         "extern function `{}` must have preemption count adjustment {}",
                         cx.def_path_str(instance.def_id()),
-                        ffi_property.adjustment,
+                        ffi_property.0,
                     ),
                 );
                 diag.note(format!(

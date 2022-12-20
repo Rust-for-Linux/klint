@@ -38,6 +38,12 @@ where
     }
 }
 
+/// Range of preemption count that the function expects.
+///
+/// Since the preemption count is a non-negative integer, the lower bound is just represented using a `u32`
+/// and "no expectation" is represented with 0; the upper bound is represented using an `Option<u32>`, with
+/// `None` representing "no expectation". The upper bound is exclusive so `(0, Some(0))` represents an
+/// unsatisfiable condition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encodable, Decodable)]
 pub struct ExpectationRange {
     pub lo: u32,
@@ -45,11 +51,11 @@ pub struct ExpectationRange {
 }
 
 impl ExpectationRange {
-    pub fn top() -> Self {
+    pub const fn top() -> Self {
         Self { lo: 0, hi: None }
     }
 
-    pub fn single_value(v: u32) -> Self {
+    pub const fn single_value(v: u32) -> Self {
         Self {
             lo: v,
             hi: Some(v + 1),
