@@ -88,6 +88,19 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 unchecked: false,
             };
         }
+        if data.len() == 2 &&
+            let DefPathData::TypeNs(fmt) = data[0].data &&
+            fmt == sym::fmt &&
+            let DefPathData::ValueNs(write) = data[1].data &&
+            write == *crate::symbol::write
+        {
+            // This is `core::fmt::write` function, which uses function pointers internally.
+            return PreemptionCount {
+                adjustment: Some(0),
+                expectation: Some(super::ExpectationRange::top()),
+                unchecked: true,
+            };
+        }
 
         Default::default()
     }

@@ -16,6 +16,7 @@ def! {
     adjust,
     expect,
     unchecked,
+    write,
     Write,
     Waker,
     wake,
