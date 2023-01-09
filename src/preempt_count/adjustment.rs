@@ -30,13 +30,40 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         &self,
         mut diag: DiagnosticBuilder<'tcx, G>,
     ) -> G {
-        for site in self.call_stack.borrow().iter().rev() {
+        let call_stack = self.call_stack.borrow();
+
+        let mut limit = usize::MAX;
+        if !self
+            .recursion_limit()
+            .value_within_limit(call_stack.len())
+        {
+            // This is recursion limit overflow, we don't want to spam the screen
+            limit = 1;
+        }
+        let mut call_stack_pos = call_stack.len();
+
+        while call_stack_pos > 0 {
+            let site = &call_stack[call_stack_pos - 1];
+
+            if limit == 0 {
+                limit = call_stack_pos.min(2);
+                if call_stack_pos > limit {
+                    diag.note(format!(
+                        "{} calls omitted due to recursion",
+                        call_stack_pos - limit
+                    ));
+                }
+                call_stack_pos = limit;
+                continue;
+            }
+
             match &site.kind {
                 UseSiteKind::Call(span) => {
                     if diag.span.is_dummy() {
                         diag.set_span(*span);
                     } else {
                         diag.span_note(*span, "which is called from here");
+                        limit -= 1;
                     }
                 }
                 UseSiteKind::Drop {
@@ -49,6 +76,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         diag.set_span(multispan);
                     } else {
                         diag.span_note(multispan, "which is dropped here");
+                        limit -= 1;
                     }
                 }
             }
@@ -59,7 +87,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     PolyDisplay(&site.instance)
                 ));
             }
+
+            call_stack_pos -= 1;
         }
+
         diag.emit()
     }
 
@@ -213,7 +244,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         self.emit_with_use_site_info(diag)
     }
 
-    pub fn infer_adjustment(
+    pub fn do_infer_adjustment(
         &self,
         param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
@@ -265,6 +296,27 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         };
 
         Ok(adjustment)
+    }
+
+    pub fn infer_adjustment(
+        &self,
+        param_env: ParamEnv<'tcx>,
+        instance: Instance<'tcx>,
+        body: &Body<'tcx>,
+    ) -> Result<i32, Error> {
+        if !self
+            .recursion_limit()
+            .value_within_limit(self.call_stack.borrow().len())
+        {
+            self.emit_with_use_site_info(self.sess.struct_fatal(format!(
+                "reached the recursion limit while checking adjustment for `{}`",
+                PolyDisplay(&param_env.and(instance))
+            )));
+        }
+
+        rustc_data_structures::stack::ensure_sufficient_stack(|| {
+            self.do_infer_adjustment(param_env, instance, body)
+        })
     }
 }
 

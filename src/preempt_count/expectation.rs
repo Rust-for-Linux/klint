@@ -11,7 +11,7 @@ use super::*;
 use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
-    pub fn infer_expectation(
+    pub fn do_infer_expectation(
         &self,
         param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
@@ -145,6 +145,27 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         }
 
         Ok(expectation_infer)
+    }
+
+    pub fn infer_expectation(
+        &self,
+        param_env: ParamEnv<'tcx>,
+        instance: Instance<'tcx>,
+        body: &Body<'tcx>,
+    ) -> Result<ExpectationRange, Error> {
+        if !self
+            .recursion_limit()
+            .value_within_limit(self.call_stack.borrow().len())
+        {
+            self.emit_with_use_site_info(self.sess.struct_fatal(format!(
+                "reached the recursion limit while checking expectation for `{}`",
+                PolyDisplay(&param_env.and(instance))
+            )));
+        }
+
+        rustc_data_structures::stack::ensure_sufficient_stack(|| {
+            self.do_infer_expectation(param_env, instance, body)
+        })
     }
 }
 
