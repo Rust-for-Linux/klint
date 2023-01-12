@@ -1,0 +1,12 @@
+warning: converting this function to pointer may result in preemption count rule violation
+  --> $DIR/function-pointer.rs:22:19
+   |
+22 |     let a: fn() = not_okay;
+   |                   ^^^^^^^^
+   |
+   = help: `not_okay` is being converted to a pointer
+   = help: adjustment of this function is inferred to be 1 and expectation is inferred to be 0..
+   = help: while the adjustment for function pointers is assumed to be 0 and the expectation be 0
+
+warning: 1 warning emitted
+

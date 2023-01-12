@@ -274,12 +274,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                         }
                     }
                 } else {
-                    self.checker
-                        .emit_with_use_site_info(self.checker.sess.struct_span_warn(
-                            terminator.source_info.span,
-                            "klint cannot yet check indirect function calls",
-                        ));
-                    Ok(0)
+                    Ok(crate::atomic_context::INDIRECT_DEFAULT.0)
                 }
             }
             TerminatorKind::Drop { place, .. } => {

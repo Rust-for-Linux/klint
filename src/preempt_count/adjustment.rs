@@ -33,10 +33,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let call_stack = self.call_stack.borrow();
 
         let mut limit = usize::MAX;
-        if !self
-            .recursion_limit()
-            .value_within_limit(call_stack.len())
-        {
+        if !self.recursion_limit().value_within_limit(call_stack.len()) {
             // This is recursion limit overflow, we don't want to spam the screen
             limit = 1;
         }
@@ -76,6 +73,22 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         diag.set_span(multispan);
                     } else {
                         diag.span_note(multispan, "which is dropped here");
+                        limit -= 1;
+                    }
+                }
+                UseSiteKind::PointerCast(span) => {
+                    if diag.span.is_dummy() {
+                        diag.set_span(*span);
+                    } else {
+                        diag.span_note(*span, "which is used as a pointer here");
+                        limit -= 1;
+                    }
+                }
+                UseSiteKind::Vtable(span) => {
+                    if diag.span.is_dummy() {
+                        diag.set_span(*span);
+                    } else {
+                        diag.span_note(*span, "which is used as a vtable here");
                         limit -= 1;
                     }
                 }
@@ -379,11 +392,7 @@ memoize!(
             }
 
             ty::Dynamic(..) => {
-                cx.emit_with_use_site_info(cx.sess.struct_warn(format!(
-                    "klint cannot yet check drop of dynamically sized `{}`",
-                    PolyDisplay(&poly_ty)
-                )));
-                return Ok(0);
+                return Ok(crate::atomic_context::VDROP_DEFAULT.0);
             }
 
             ty::Array(elem_ty, size) => {
@@ -502,11 +511,7 @@ memoize!(
                     return Ok(adj);
                 }
 
-                cx.emit_with_use_site_info(cx.sess.struct_span_warn(
-                    cx.def_span(instance.def_id()),
-                    "klint cannot yet check indirect function calls without preemption count annotation",
-                ));
-                return Ok(0);
+                return Ok(crate::atomic_context::VCALL_DEFAULT.0);
             }
             _ => (),
         }

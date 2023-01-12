@@ -62,6 +62,10 @@ declare_tool_lint! {
     ""
 }
 
+pub const INDIRECT_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::single_value(0));
+pub const VDROP_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::top());
+pub const VCALL_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::top());
+
 impl<'tcx> AnalysisCtxt<'tcx> {
     pub fn ffi_property(&self, instance: Instance<'tcx>) -> (i32, ExpectationRange) {
         const NO_ASSUMPTION: (i32, ExpectationRange) = (0, ExpectationRange::top());
@@ -272,6 +276,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
             .and(instance);
         let _ = self.cx.instance_adjustment(param_and_instance);
         let _ = self.cx.instance_expectation(param_and_instance);
+        let _ = self.cx.instance_check_indirect(param_and_instance);
     }
 
     fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {

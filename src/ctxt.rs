@@ -87,7 +87,7 @@ macro_rules! memoize {
                         return <$ret>::clone(val);
                     }
                 }
-                let val = $name(self, $($key)*);
+                let val = $name(self, $($key),*);
                 let mut guard = cache.borrow_mut();
                 guard.insert(pack, <$ret>::clone(&val));
                 val
@@ -276,6 +276,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         ret.sql_create_table::<crate::preempt_count::annotation::preemption_count_annotation>();
         ret.sql_create_table::<crate::preempt_count::adjustment::instance_adjustment>();
         ret.sql_create_table::<crate::preempt_count::expectation::instance_expectation>();
+        ret.sql_create_table::<crate::preempt_count::check_indirect::instance_check_indirect>();
         ret.sql_create_table::<crate::mir::analysis_mir>();
         ret
     }

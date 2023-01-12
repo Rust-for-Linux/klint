@@ -68,11 +68,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                             result?
                         }
                     } else {
-                        self.emit_with_use_site_info(self.sess.struct_span_warn(
-                            data.terminator().source_info.span,
-                            "klint cannot yet check indirect function calls",
-                        ));
-                        ExpectationRange::top()
+                        crate::atomic_context::INDIRECT_DEFAULT.1
                     }
                 }
                 TerminatorKind::Drop { place, .. } => {
@@ -171,7 +167,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
 memoize!(
     #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)), ret)]
-    fn drop_expectation<'tcx>(
+    pub fn drop_expectation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
     ) -> Result<ExpectationRange, Error> {
@@ -243,11 +239,7 @@ memoize!(
             }
 
             ty::Dynamic(..) => {
-                cx.sess.warn(format!(
-                    "klint cannot yet check drop of dynamically sized `{}`",
-                    PolyDisplay(&poly_ty)
-                ));
-                return Ok(ExpectationRange::top());
+                return Ok(crate::atomic_context::VDROP_DEFAULT.1);
             }
 
             ty::Array(elem_ty, size) => {
@@ -388,11 +380,7 @@ memoize!(
                     return Ok(exp);
                 }
 
-                cx.emit_with_use_site_info(cx.sess.struct_span_warn(
-                    cx.def_span(instance.def_id()),
-                    "klint cannot yet check indirect function calls without preemption count annotation",
-                ));
-                return Ok(ExpectationRange::top());
+                return Ok(crate::atomic_context::VCALL_DEFAULT.1);
             }
             _ => (),
         }

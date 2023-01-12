@@ -33,6 +33,7 @@ use std::path::PathBuf;
 // From rustc_mir/monomorphize/mod.rs
 fn custom_coerce_unsize_info<'tcx>(
     tcx: TyCtxt<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
     source_ty: Ty<'tcx>,
     target_ty: Ty<'tcx>,
 ) -> CustomCoerceUnsized {
@@ -43,7 +44,7 @@ fn custom_coerce_unsize_info<'tcx>(
         substs: tcx.mk_substs_trait(source_ty, &[target_ty.into()]),
     });
 
-    match tcx.codegen_select_candidate((ty::ParamEnv::reveal_all(), trait_ref)) {
+    match tcx.codegen_select_candidate((param_env, trait_ref)) {
         Ok(traits::ImplSource::UserDefined(traits::ImplSourceUserDefinedData {
             impl_def_id,
             ..
@@ -520,8 +521,12 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
                 let target_ty = self.monomorphize(target_ty);
                 let source_ty = operand.ty(self.body, self.tcx);
                 let source_ty = self.monomorphize(source_ty);
-                let (source_ty, target_ty) =
-                    find_vtable_types_for_unsizing(self.tcx, source_ty, target_ty);
+                let (source_ty, target_ty) = find_vtable_types_for_unsizing(
+                    self.tcx,
+                    ty::ParamEnv::reveal_all(),
+                    source_ty,
+                    target_ty,
+                );
                 // This could also be a different Unsize instruction, like
                 // from a fixed sized array to a slice. But we are only
                 // interested in things that produce a vtable.
@@ -843,13 +848,13 @@ pub fn should_codegen_locally<'tcx>(tcx: TyCtxt<'tcx>, instance: &Instance<'tcx>
 ///
 /// Finally, there is also the case of custom unsizing coercions, e.g., for
 /// smart pointers such as `Rc` and `Arc`.
-fn find_vtable_types_for_unsizing<'tcx>(
+pub fn find_vtable_types_for_unsizing<'tcx>(
     tcx: TyCtxt<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
     source_ty: Ty<'tcx>,
     target_ty: Ty<'tcx>,
 ) -> (Ty<'tcx>, Ty<'tcx>) {
     let ptr_vtable = |inner_source: Ty<'tcx>, inner_target: Ty<'tcx>| {
-        let param_env = ty::ParamEnv::reveal_all();
         let type_has_metadata = |ty: Ty<'tcx>| -> bool {
             if ty.is_sized(tcx, param_env) {
                 return false;
@@ -884,7 +889,7 @@ fn find_vtable_types_for_unsizing<'tcx>(
             assert_eq!(source_adt_def, target_adt_def);
 
             let CustomCoerceUnsized::Struct(coerce_index) =
-                custom_coerce_unsize_info(tcx, source_ty, target_ty);
+                custom_coerce_unsize_info(tcx, param_env, source_ty, target_ty);
 
             let source_fields = &source_adt_def.non_enum_variant().fields;
             let target_fields = &target_adt_def.non_enum_variant().fields;
@@ -895,6 +900,7 @@ fn find_vtable_types_for_unsizing<'tcx>(
 
             find_vtable_types_for_unsizing(
                 tcx,
+                param_env,
                 source_fields[coerce_index].ty(tcx, source_substs),
                 target_fields[coerce_index].ty(tcx, target_substs),
             )

@@ -1,5 +1,6 @@
 pub mod adjustment;
 pub mod annotation;
+pub mod check_indirect;
 pub mod dataflow;
 pub mod expectation;
 
@@ -167,6 +168,8 @@ pub enum UseSiteKind {
         /// Span of the place being dropped.
         place_span: Span,
     },
+    PointerCast(Span),
+    Vtable(Span),
 }
 
 #[derive(Debug)]
