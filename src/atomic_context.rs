@@ -91,6 +91,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // Basic string operations depended by libcore.
             "memcmp" | "strlen" | "memchr" => NO_ASSUMPTION,
 
+            // Compiler-builtins
+            "__eqsf2" | "__gesf2" | "__lesf2" | "__nesf2" | "__unordsf2" | "__unorddf2"
+            | "__ashrti3" | "__muloti4" | "__multi3" | "__ashlti3" | "__lshrti3"
+            | "__udivmodti4" | "__udivti3" | "__umodti3" | "__aeabi_fcmpeq" | "__aeabi_fcmpun"
+            | "__aeabi_dcmpun" | "__aeabi_uldivmod" => NO_ASSUMPTION,
+
             // Memory allocations glues depended by liballoc.
             // Allocation functions may sleep.
             "__rust_alloc"
@@ -114,7 +120,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "REFCOUNT_INIT" | "refcount_inc" | "refcount_dec_and_test" => NO_ASSUMPTION,
 
             // Printk can be called from any context.
-            "_printk" | "_dev_printk" | "BUG" => NO_ASSUMPTION,
+            "_printk" | "_dev_printk" | "BUG" | "rust_fmt_argument" => NO_ASSUMPTION,
+            "rust_build_error" => NO_ASSUMPTION,
 
             "ioremap" | "iounmap" => MIGHT_SLEEP,
 
@@ -130,7 +137,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "wait_for_random_bytes" => MIGHT_SLEEP,
 
             // Userspace memory access might fault, and thus sleep.
-            "copy_from_user" | "copy_to_user" | "clear_user" => MIGHT_SLEEP,
+            "copy_from_user" | "copy_to_user" | "clear_user" | "copy_from_iter"
+            | "copy_to_iter" | "iov_iter_zero" => MIGHT_SLEEP,
 
             // Spinlock functions.
             "__spin_lock_init" | "_raw_spin_lock_init" => NO_ASSUMPTION,
@@ -144,13 +152,17 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
             // Mutex functions.
             "__init_rwsem" | "__mutex_init" => NO_ASSUMPTION,
-            "down_read" | "down_write" | "mutex_lock" => MIGHT_SLEEP,
-            "up_read" | "up_write" | "mutex_unlock" => NO_ASSUMPTION,
+            "down_read" | "down_write" | "mutex_lock" | "kernel_param_lock" => MIGHT_SLEEP,
+            "up_read" | "up_write" | "mutex_unlock" | "kernel_param_unlock" => NO_ASSUMPTION,
 
             // RCU
             "rcu_read_lock" => SPIN_LOCK,
             "rcu_read_unlock" => SPIN_UNLOCK,
             "synchronize_rcu" => MIGHT_SLEEP,
+
+            // Params
+            "fs_param_is_bool" | "fs_param_is_enum" | "fs_param_is_s32" | "fs_param_is_string"
+            | "fs_param_is_u32" | "fs_param_is_u64" => NO_ASSUMPTION,
 
             "__cant_sleep" => (0, ExpectationRange { lo: 1, hi: None }),
             "__might_sleep" | "msleep" => MIGHT_SLEEP,
