@@ -8,6 +8,7 @@ use rustc_mir_dataflow::Analysis;
 
 use super::dataflow::AdjustmentComputation;
 use super::*;
+use crate::attribute::PreemptionCount;
 use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
@@ -178,6 +179,7 @@ memoize!(
             return Ok(ExpectationRange::top());
         }
 
+        let mut annotation = PreemptionCount::default();
         match ty.kind() {
             ty::Closure(_, substs) => {
                 return cx.drop_expectation(param_env.and(substs.as_closure().tupled_upvars_ty()));
@@ -236,6 +238,11 @@ memoize!(
 
                 // If that fails, we try to use the substs.
                 // Fallthrough to the MIR drop shim based logic.
+
+                annotation = cx.drop_preemption_count_annotation(def.did());
+                if let Some(exp) = annotation.expectation {
+                    info!("expectation {} from annotation", exp);
+                }
             }
 
             ty::Dynamic(..) => {
@@ -326,7 +333,34 @@ memoize!(
         }
 
         let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
-        let result = cx.infer_expectation(param_env, instance, &mir);
+        let result = if !annotation.unchecked || annotation.expectation.is_none() {
+            let infer_result = cx.infer_expectation(param_env, instance, &mir);
+            if let Ok(expectation_infer) = infer_result {
+                // Check if the inferred expectation matches the annotation.
+                if let Some(expectation) = annotation.expectation {
+                    if !expectation_infer.contains_range(expectation) {
+                        let mut diag = cx.sess.struct_span_err(
+                            cx.def_span(instance.def_id()),
+                            format!(
+                                "type annotated to have drop preemption count expectation of {}",
+                                expectation
+                            ),
+                        );
+                        diag.note(format!(
+                            "but the expectation inferred is {expectation_infer}"
+                        ));
+                        diag.emit();
+                    }
+                    Ok(expectation)
+                } else {
+                    Ok(expectation_infer)
+                }
+            } else {
+                infer_result
+            }
+        } else {
+            Ok(annotation.expectation.unwrap())
+        };
 
         // Recursion encountered.
         if let Some(&recur) = cx.query_cache::<drop_expectation>().borrow().get(&poly_ty) {
@@ -338,6 +372,9 @@ memoize!(
                 (Ok(a), Ok(b)) if a == b => (),
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
                 (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
+                (Ok(_), Ok(_)) if annotation.expectation.is_some() => {
+                    bug!("recursive outcome does not match annotation")
+                }
                 (Ok(exp), Ok(_)) => {
                     let mut diag = cx.sess.struct_span_err(
                         ty.ty_adt_def()

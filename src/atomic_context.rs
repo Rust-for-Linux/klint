@@ -195,14 +195,16 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         use rustc_hir::intravisit as hir_visit;
         use rustc_hir::*;
 
-        struct FnVisitor<'tcx, F> {
+        struct FnAdtVisitor<'tcx, F, A> {
             tcx: TyCtxt<'tcx>,
-            callback: F,
+            fn_callback: F,
+            adt_callback: A,
         }
 
-        impl<'tcx, F> hir_visit::Visitor<'tcx> for FnVisitor<'tcx, F>
+        impl<'tcx, F, A> hir_visit::Visitor<'tcx> for FnAdtVisitor<'tcx, F, A>
         where
             F: FnMut(HirId),
+            A: FnMut(HirId),
         {
             type NestedFilter = rustc_middle::hir::nested_filter::All;
 
@@ -213,10 +215,20 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
                 self.tcx.hir()
             }
 
+            fn visit_item(&mut self, i: &'tcx Item<'tcx>) {
+                match i.kind {
+                    ItemKind::Struct(..) | ItemKind::Union(..) | ItemKind::Enum(..) => {
+                        (self.adt_callback)(i.hir_id());
+                    }
+                    _ => (),
+                }
+                hir_visit::walk_item(self, i);
+            }
+
             fn visit_foreign_item(&mut self, i: &'tcx ForeignItem<'tcx>) {
                 match i.kind {
                     ForeignItemKind::Fn(..) => {
-                        (self.callback)(i.hir_id());
+                        (self.fn_callback)(i.hir_id());
                     }
                     _ => (),
                 }
@@ -226,7 +238,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
             fn visit_trait_item(&mut self, ti: &'tcx TraitItem<'tcx>) {
                 match ti.kind {
                     TraitItemKind::Fn(_, TraitFn::Required(_)) => {
-                        (self.callback)(ti.hir_id());
+                        (self.fn_callback)(ti.hir_id());
                     }
                     _ => (),
                 }
@@ -241,23 +253,33 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
                 _: Span,
                 id: HirId,
             ) {
-                (self.callback)(id);
+                (self.fn_callback)(id);
                 hir_visit::walk_fn(self, fk, fd, b, id)
             }
         }
 
         // Do this before the lint pass to ensure that errors, if any, are nicely sorted.
-        self.cx.hir().visit_all_item_likes_in_crate(&mut FnVisitor {
-            tcx: self.cx.tcx,
-            callback: |hir_id| {
-                let def_id = self.cx.hir().local_def_id(hir_id).to_def_id();
-                let annotation = self.cx.preemption_count_annotation(def_id);
-                self.cx
-                    .sql_store::<crate::preempt_count::annotation::preemption_count_annotation>(
-                        def_id, annotation,
-                    );
-            },
-        });
+        self.cx
+            .hir()
+            .visit_all_item_likes_in_crate(&mut FnAdtVisitor {
+                tcx: self.cx.tcx,
+                fn_callback: |hir_id| {
+                    let def_id = self.cx.hir().local_def_id(hir_id).to_def_id();
+                    let annotation = self.cx.preemption_count_annotation(def_id);
+                    self.cx
+                        .sql_store::<crate::preempt_count::annotation::preemption_count_annotation>(
+                            def_id, annotation,
+                        );
+                },
+                adt_callback: |hir_id| {
+                    let def_id = self.cx.hir().local_def_id(hir_id).to_def_id();
+                    let annotation = self.cx.drop_preemption_count_annotation(def_id);
+                    self.cx
+                        .sql_store::<crate::preempt_count::annotation::drop_preemption_count_annotation>(
+                            def_id, annotation,
+                        );
+                },
+            });
     }
 
     fn check_fn(

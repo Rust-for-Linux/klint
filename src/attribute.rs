@@ -29,6 +29,7 @@ impl Default for PreemptionCount {
 #[derive(Debug)]
 pub enum KlintAttribute {
     PreemptionCount(PreemptionCount),
+    DropPreemptionCount(PreemptionCount),
     ReportPreeptionCount,
 }
 
@@ -398,6 +399,9 @@ impl<'tcx> AttrParser<'tcx> {
             v if v == *crate::symbol::preempt_count => Some(KlintAttribute::PreemptionCount(
                 self.parse_preempt_count(attr, item).ok()?,
             )),
+            v if v == *crate::symbol::drop_preempt_count => Some(
+                KlintAttribute::DropPreemptionCount(self.parse_preempt_count(attr, item).ok()?),
+            ),
             v if v == *crate::symbol::report_preempt_count => {
                 Some(KlintAttribute::ReportPreeptionCount)
             }

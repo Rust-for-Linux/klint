@@ -9,6 +9,7 @@ use rustc_mir_dataflow::JoinSemiLattice;
 
 use super::dataflow::{AdjustmentBoundsOrError, AdjustmentComputation};
 use super::*;
+use crate::attribute::PreemptionCount;
 use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
@@ -346,6 +347,7 @@ memoize!(
             return Ok(0);
         }
 
+        let mut annotation = PreemptionCount::default();
         match ty.kind() {
             ty::Closure(_, substs) => {
                 return cx.drop_adjustment(param_env.and(substs.as_closure().tupled_upvars_ty()));
@@ -389,6 +391,11 @@ memoize!(
 
                 // If that fails, we try to use the substs.
                 // Fallthrough to the MIR drop shim based logic.
+
+                annotation = cx.drop_preemption_count_annotation(def.did());
+                if let Some(adj) = annotation.adjustment {
+                    info!("adjustment {} from annotation", adj);
+                }
             }
 
             ty::Dynamic(..) => {
@@ -455,7 +462,7 @@ memoize!(
         {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
-                return Ok(0);
+                return Ok(annotation.adjustment.unwrap_or(0));
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
                 return Err(Error::TooGeneric);
@@ -463,7 +470,29 @@ memoize!(
         }
 
         let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
-        let result = cx.infer_adjustment(param_env, instance, &mir);
+        let result = if !annotation.unchecked || annotation.adjustment.is_none() {
+            let infer_result = cx.infer_adjustment(param_env, instance, &mir);
+            if let Ok(adjustment_infer) = infer_result {
+                // Check if the inferred adjustment matches the annotation.
+                if let Some(adjustment) = annotation.adjustment {
+                    if adjustment != adjustment_infer {
+                        let mut diag = cx.sess.struct_span_err(
+                            cx.def_span(instance.def_id()),
+                            format!("type annotated to have drop preemption count adjustment of {adjustment}"),
+                        );
+                        diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
+                        cx.emit_with_use_site_info(diag);
+                    }
+                    Ok(adjustment)
+                } else {
+                    Ok(adjustment_infer)
+                }
+            } else {
+                infer_result
+            }
+        } else {
+            Ok(annotation.adjustment.unwrap())
+        };
 
         // Recursion encountered.
         if let Some(&recur) = cx.query_cache::<drop_adjustment>().borrow().get(&poly_ty) {
@@ -475,6 +504,9 @@ memoize!(
                 (Ok(a), Ok(b)) if a == b => (),
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
                 (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
+                (Ok(_), Ok(_)) if annotation.adjustment.is_some() => {
+                    bug!("recursive outcome does not match annotation")
+                }
                 (Ok(adj), Ok(_)) => {
                     let mut diag = cx.sess.struct_span_err(
                         ty.ty_adt_def()
