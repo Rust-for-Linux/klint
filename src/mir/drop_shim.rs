@@ -5,11 +5,13 @@ use rustc_hir::def_id::DefId;
 use rustc_index::vec::{Idx, IndexVec};
 use rustc_middle::mir::patch::MirPatch;
 use rustc_middle::mir::*;
-use rustc_middle::ty::{self, ParamEnv, Ty, TyCtxt};
+use rustc_middle::ty::{self, EarlyBinder, ParamEnv, Ty, TyCtxt};
 use rustc_mir_dataflow::elaborate_drops::{self, *};
 use rustc_span::Span;
 use rustc_target::abi::VariantIdx;
 use std::{fmt, iter};
+
+use crate::ctxt::AnalysisCtxt;
 
 fn local_decls_for_sig<'tcx>(
     sig: &ty::FnSig<'tcx>,
@@ -24,19 +26,23 @@ fn local_decls_for_sig<'tcx>(
         .collect()
 }
 
-#[instrument(skip(tcx))]
+#[instrument(skip(cx))]
 pub fn build_drop_shim<'tcx>(
-    tcx: TyCtxt<'tcx>,
+    cx: &AnalysisCtxt<'tcx>,
     def_id: DefId,
     param_env: ParamEnv<'tcx>,
     ty: Ty<'tcx>,
 ) -> Body<'tcx> {
-    assert!(!ty.is_generator());
+    if let ty::Generator(gen_def_id, substs, _) = ty.kind() {
+        let body = cx.analysis_mir(*gen_def_id).generator_drop().unwrap();
+        let body = EarlyBinder(body.clone()).subst(cx.tcx, substs);
+        return body;
+    }
 
-    let substs = tcx.intern_substs(&[ty.into()]);
-    let sig = tcx.bound_fn_sig(def_id).subst(tcx, substs);
-    let sig = tcx.erase_late_bound_regions(sig);
-    let span = tcx.def_span(def_id);
+    let substs = cx.intern_substs(&[ty.into()]);
+    let sig = cx.bound_fn_sig(def_id).subst(cx.tcx, substs);
+    let sig = cx.erase_late_bound_regions(sig);
+    let span = cx.def_span(def_id);
 
     let source_info = SourceInfo::outermost(span);
 
@@ -72,10 +78,10 @@ pub fn build_drop_shim<'tcx>(
         let mut elaborator = DropShimElaborator {
             body: &body,
             patch: MirPatch::new(&body),
-            tcx,
+            tcx: cx.tcx,
             param_env,
         };
-        let dropee = tcx.mk_place_deref(dropee_ptr);
+        let dropee = cx.mk_place_deref(dropee_ptr);
         let resume_block = elaborator.patch.resume_block();
         elaborate_drops::elaborate_drop(
             &mut elaborator,

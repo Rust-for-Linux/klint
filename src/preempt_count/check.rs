@@ -668,7 +668,7 @@ memoize!(
             return Ok(());
         }
 
-        let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
+        let mir = crate::mir::drop_shim::build_drop_shim(cx, instance.def_id(), param_env, ty);
         let result = cx.indirect_check(param_env, instance, &mir);
 
         result

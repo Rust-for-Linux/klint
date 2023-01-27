@@ -467,7 +467,7 @@ memoize!(
             }
         }
 
-        let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
+        let mir = crate::mir::drop_shim::build_drop_shim(cx, instance.def_id(), param_env, ty);
         let result = cx.infer_adjustment(param_env, instance, &mir);
 
         // Recursion encountered.
@@ -568,7 +568,7 @@ memoize!(
             ty::InstanceDef::DropGlue(_, Some(_))
         ));
 
-        let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
+        let mir = crate::mir::drop_shim::build_drop_shim(cx, instance.def_id(), param_env, ty);
         let adjustment_infer = cx.infer_adjustment(param_env, instance, &mir)?;
         // Check if the inferred adjustment matches the annotation.
         if let Some(adjustment) = annotation.adjustment {
@@ -786,18 +786,18 @@ memoize!(
         if annotation.adjustment.is_some() && !annotation.unchecked {
             let mir = cx.analysis_instance_mir(instance.def);
             let adjustment_infer = cx.infer_adjustment(param_env, instance, mir)?;
-                // Check if the inferred adjustment matches the annotation.
-                    if adjustment != adjustment_infer {
-                        let mut diag = cx.sess.struct_span_err(
-                            cx.def_span(instance.def_id()),
+            // Check if the inferred adjustment matches the annotation.
+            if adjustment != adjustment_infer {
+                let mut diag = cx.sess.struct_span_err(
+                    cx.def_span(instance.def_id()),
                     format!(
                         "function annotated to have preemption count adjustment of {adjustment}"
                     ),
-                        );
-                        diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
-                        cx.emit_with_use_site_info(diag);
-                    }
-                }
+                );
+                diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
+                cx.emit_with_use_site_info(diag);
+            }
+        }
 
         // Addition check for trait impl methods.
         if matches!(instance.def, ty::InstanceDef::Item(_)) &&
