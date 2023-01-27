@@ -325,7 +325,7 @@ memoize!(
         {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
-                return Ok(ExpectationRange::top());
+                return Ok(annotation.expectation.unwrap_or(ExpectationRange::top()));
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
                 return Err(Error::TooGeneric);
