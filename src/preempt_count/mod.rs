@@ -1,6 +1,6 @@
 pub mod adjustment;
 pub mod annotation;
-pub mod check_indirect;
+pub mod check;
 pub mod dataflow;
 pub mod expectation;
 

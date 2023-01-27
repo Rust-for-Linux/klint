@@ -1,6 +1,6 @@
 use super::*;
 use crate::ctxt::AnalysisCtxt;
-use rustc_hir::def_id::{CrateNum, DefId};
+use rustc_hir::def_id::DefId;
 use rustc_hir::{Constness, LangItem};
 use rustc_infer::traits::util::PredicateSet;
 use rustc_middle::mir::interpret::{AllocId, ConstValue, ErrorHandled, GlobalAlloc, Scalar};
@@ -197,9 +197,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                         instance: self.param_env.and(self.instance),
                         kind: UseSiteKind::Call(span),
                     });
-                    let result = self
-                        .cx
-                        .instance_check_indirect(self.param_env.and(instance));
+                    let result = self.cx.instance_check(self.param_env.and(instance));
                     self.cx.call_stack.borrow_mut().pop();
                     result?
                 }
@@ -215,7 +213,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                         place_span: self.body.local_decls[place.local].source_info.span,
                     },
                 });
-                let result = self.cx.drop_check_indirect(self.param_env.and(ty));
+                let result = self.cx.drop_check(self.param_env.and(ty));
                 self.cx.call_stack.borrow_mut().pop();
                 result?
             }
@@ -350,7 +348,7 @@ impl<'mir, 'tcx, 'cx> MirVisitor<'tcx> for MirNeighborVisitor<'mir, 'tcx, 'cx> {
 }
 
 impl<'tcx> AnalysisCtxt<'tcx> {
-    pub fn do_actual_check_indirect(
+    pub fn do_indirect_check(
         &self,
         param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
@@ -367,7 +365,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         visitor.result
     }
 
-    pub fn do_check_indirect(
+    pub fn indirect_check(
         &self,
         param_env: ParamEnv<'tcx>,
         instance: Instance<'tcx>,
@@ -384,7 +382,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         }
 
         rustc_data_structures::stack::ensure_sufficient_stack(|| {
-            self.do_actual_check_indirect(param_env, instance, body)
+            self.do_indirect_check(param_env, instance, body)
         })
     }
 }
@@ -397,7 +395,7 @@ memoize!(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
     ) -> Result<(), Error> {
-        cx.instance_check_indirect(poly_instance)?;
+        cx.instance_check(poly_instance)?;
 
         let adj = cx.instance_adjustment(poly_instance)?;
         let exp = cx.instance_expectation(poly_instance)?;
@@ -495,7 +493,7 @@ memoize!(
                         .unwrap()
                         .ok_or(Error::TooGeneric)?;
                     let poly_instance = param_env.and(instance);
-                    cx.instance_check_indirect(poly_instance)?;
+                    cx.instance_check(poly_instance)?;
 
                     // Find the `DefId` of the trait method.
                     let trait_item = if let Some(impl_) = cx.impl_of_method(instance.def_id()) {
@@ -582,10 +580,13 @@ memoize!(
 
 memoize!(
     #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)), ret)]
-    fn drop_check_indirect<'tcx>(
+    fn drop_check<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
     ) -> Result<(), Error> {
+        cx.drop_adjustment_check(poly_ty)?;
+        cx.drop_expectation_check(poly_ty)?;
+
         let (param_env, ty) = poly_ty.into_parts();
 
         // If the type doesn't need drop, then it trivially refers to nothing.
@@ -595,8 +596,7 @@ memoize!(
 
         match ty.kind() {
             ty::Closure(_, substs) => {
-                return cx
-                    .drop_check_indirect(param_env.and(substs.as_closure().tupled_upvars_ty()));
+                return cx.drop_check(param_env.and(substs.as_closure().tupled_upvars_ty()));
             }
 
             // Generator drops are non-trivial, use the generated drop shims instead.
@@ -604,15 +604,15 @@ memoize!(
 
             ty::Tuple(list) => {
                 for ty in list.iter() {
-                    cx.drop_check_indirect(param_env.and(ty))?;
+                    cx.drop_check(param_env.and(ty))?;
                 }
                 return Ok(());
             }
 
             ty::Adt(def, substs) if def.is_box() => {
-                cx.drop_check_indirect(param_env.and(substs.type_at(0)))?;
+                cx.drop_check(param_env.and(substs.type_at(0)))?;
                 let box_free = cx.require_lang_item(LangItem::BoxFree, None);
-                cx.instance_check_indirect(param_env.and(Instance::new(box_free, substs)))?;
+                cx.instance_check(param_env.and(Instance::new(box_free, substs)))?;
                 return Ok(());
             }
 
@@ -624,7 +624,7 @@ memoize!(
                     cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
                 let poly_poly_ty = poly_param_env.and(cx.tcx.mk_ty(ty::Adt(*def, poly_substs)));
                 if poly_poly_ty != poly_ty {
-                    match cx.drop_check_indirect(poly_poly_ty) {
+                    match cx.drop_check(poly_poly_ty) {
                         Err(Error::TooGeneric) => (),
                         v => return v,
                     }
@@ -638,7 +638,7 @@ memoize!(
 
             // Array and slice drops only refer to respective element destructor.
             ty::Array(elem_ty, _) | ty::Slice(elem_ty) => {
-                return cx.drop_check_indirect(param_env.and(*elem_ty));
+                return cx.drop_check(param_env.and(*elem_ty));
             }
 
             _ => return Err(Error::TooGeneric),
@@ -669,11 +669,7 @@ memoize!(
         }
 
         let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
-        let result = cx.do_check_indirect(param_env, instance, &mir);
-
-        // if instance.def_id().is_local() && param_env.caller_bounds().is_empty() {
-        //     cx.sql_store::<drop_adjustment>(poly_instance, result);
-        // }
+        let result = cx.indirect_check(param_env, instance, &mir);
 
         result
     }
@@ -681,25 +677,29 @@ memoize!(
 
 memoize!(
     #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)), ret)]
-    pub fn instance_check_indirect<'tcx>(
+    pub fn instance_check<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
     ) -> Result<(), Error> {
         let (param_env, instance) = poly_instance.into_parts();
+        if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
+            return Ok(());
+        }
+
+        cx.instance_adjustment_check(poly_instance)?;
+        cx.instance_expectation_check(poly_instance)?;
+
         match instance.def {
             // Rust built-in intrinsics does not refer to anything else.
             ty::InstanceDef::Intrinsic(_) => return Ok(()),
             // Empty drop glue, then it is a no-op.
             ty::InstanceDef::DropGlue(_, None) => return Ok(()),
-            ty::InstanceDef::DropGlue(_, Some(ty)) => {
-                return cx.drop_check_indirect(param_env.and(ty))
-            }
+            ty::InstanceDef::DropGlue(_, Some(ty)) => return cx.drop_check(param_env.and(ty)),
             // Can't check further here. Will be checked at vtable generation site.
             ty::InstanceDef::Virtual(_, _) => return Ok(()),
             _ => (),
         }
 
-        let mut generic = false;
         if matches!(instance.def, ty::InstanceDef::Item(_)) {
             let poly_param_env = cx
                 .param_env_reveal_all_normalized(instance.def_id())
@@ -708,9 +708,9 @@ memoize!(
                 cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
             let poly_poly_instance =
                 poly_param_env.and(Instance::new(instance.def_id(), poly_substs));
-            generic = poly_poly_instance == poly_instance;
+            let generic = poly_poly_instance == poly_instance;
             if !generic {
-                match cx.instance_check_indirect(poly_poly_instance) {
+                match cx.instance_check(poly_poly_instance) {
                     Err(Error::TooGeneric) => (),
                     expectation => return expectation,
                 }
@@ -719,15 +719,6 @@ memoize!(
 
         // Foreign functions will not directly refer to Rust items
         if cx.is_foreign_item(instance.def_id()) {
-            return Ok(());
-        }
-
-        if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
-            if let Some(p) = cx.sql_load::<instance_check_indirect>(poly_instance) {
-                return p;
-            }
-
-            warn!("Unable to check non-local function {:?}", instance);
             return Ok(());
         }
 
@@ -743,21 +734,8 @@ memoize!(
         }
 
         let mir = cx.analysis_instance_mir(instance.def);
-        let result = cx.do_check_indirect(param_env, instance, mir);
-
-        if instance.def_id().is_local() && (generic || param_env.caller_bounds().is_empty()) {
-            cx.sql_store::<instance_check_indirect>(poly_instance, result);
-        }
+        let result = cx.indirect_check(param_env, instance, mir);
 
         result
     }
 );
-
-impl crate::ctxt::PersistentQuery for instance_check_indirect {
-    type LocalKey<'tcx> = Instance<'tcx>;
-
-    fn into_crate_and_local<'tcx>(key: Self::Key<'tcx>) -> (CrateNum, Self::LocalKey<'tcx>) {
-        let instance = key.value;
-        (instance.def_id().krate, instance)
-    }
-}

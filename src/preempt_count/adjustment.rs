@@ -9,7 +9,6 @@ use rustc_mir_dataflow::JoinSemiLattice;
 
 use super::dataflow::{AdjustmentBoundsOrError, AdjustmentComputation};
 use super::*;
-use crate::attribute::PreemptionCount;
 use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
@@ -347,7 +346,6 @@ memoize!(
             return Ok(0);
         }
 
-        let mut annotation = PreemptionCount::default();
         match ty.kind() {
             ty::Closure(_, substs) => {
                 return cx.drop_adjustment(param_env.and(substs.as_closure().tupled_upvars_ty()));
@@ -392,9 +390,9 @@ memoize!(
                 // If that fails, we try to use the substs.
                 // Fallthrough to the MIR drop shim based logic.
 
-                annotation = cx.drop_preemption_count_annotation(def.did());
-                if let Some(adj) = annotation.adjustment {
+                if let Some(adj) = cx.drop_preemption_count_annotation(def.did()).adjustment {
                     info!("adjustment {} from annotation", adj);
+                    return Ok(adj);
                 }
             }
 
@@ -462,7 +460,7 @@ memoize!(
         {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
-                return Ok(annotation.adjustment.unwrap_or(0));
+                return Ok(0);
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
                 return Err(Error::TooGeneric);
@@ -470,29 +468,7 @@ memoize!(
         }
 
         let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
-        let result = if !annotation.unchecked || annotation.adjustment.is_none() {
-            let infer_result = cx.infer_adjustment(param_env, instance, &mir);
-            if let Ok(adjustment_infer) = infer_result {
-                // Check if the inferred adjustment matches the annotation.
-                if let Some(adjustment) = annotation.adjustment {
-                    if adjustment != adjustment_infer {
-                        let mut diag = cx.sess.struct_span_err(
-                            cx.def_span(instance.def_id()),
-                            format!("type annotated to have drop preemption count adjustment of {adjustment}"),
-                        );
-                        diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
-                        cx.emit_with_use_site_info(diag);
-                    }
-                    Ok(adjustment)
-                } else {
-                    Ok(adjustment_infer)
-                }
-            } else {
-                infer_result
-            }
-        } else {
-            Ok(annotation.adjustment.unwrap())
-        };
+        let result = cx.infer_adjustment(param_env, instance, &mir);
 
         // Recursion encountered.
         if let Some(&recur) = cx.query_cache::<drop_adjustment>().borrow().get(&poly_ty) {
@@ -504,9 +480,6 @@ memoize!(
                 (Ok(a), Ok(b)) if a == b => (),
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
                 (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
-                (Ok(_), Ok(_)) if annotation.adjustment.is_some() => {
-                    bug!("recursive outcome does not match annotation")
-                }
                 (Ok(adj), Ok(_)) => {
                     let mut diag = cx.sess.struct_span_err(
                         ty.ty_adt_def()
@@ -522,6 +495,96 @@ memoize!(
         }
 
         result
+    }
+);
+
+memoize!(
+    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)), ret)]
+    pub fn drop_adjustment_check<'tcx>(
+        cx: &AnalysisCtxt<'tcx>,
+        poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
+    ) -> Result<(), Error> {
+        let adjustment = cx.drop_adjustment(poly_ty)?;
+        let (param_env, ty) = poly_ty.into_parts();
+
+        // If the type doesn't need drop, then there is trivially no adjustment.
+        if !ty.needs_drop(cx.tcx, param_env) {
+            return Ok(());
+        }
+
+        let annotation;
+        match ty.kind() {
+            ty::Closure(..)
+            | ty::Generator(..)
+            | ty::Tuple(..)
+            | ty::Dynamic(..)
+            | ty::Array(..)
+            | ty::Slice(..) => return Ok(()),
+
+            // Box is always inferred
+            ty::Adt(def, _) if def.is_box() => return Ok(()),
+
+            ty::Adt(def, _) => {
+                // For Adts, we first try to not use any of the substs and just try the most
+                // polymorphic version of the type.
+                let poly_param_env = cx.param_env_reveal_all_normalized(def.did());
+                let poly_substs =
+                    cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
+                let poly_poly_ty = poly_param_env.and(cx.tcx.mk_ty(ty::Adt(*def, poly_substs)));
+                if poly_poly_ty != poly_ty {
+                    match cx.drop_adjustment_check(poly_poly_ty) {
+                        Err(Error::TooGeneric) => (),
+                        result => return result,
+                    }
+                }
+
+                // If that fails, we try to use the substs.
+                // Fallthrough to the MIR drop shim based logic.
+
+                annotation = cx.drop_preemption_count_annotation(def.did());
+                if let Some(adj) = annotation.adjustment {
+                    assert!(adj == adjustment);
+                }
+            }
+
+            _ => return Err(Error::TooGeneric),
+        }
+
+        // If adjustment is inferred or the type is annotated as unchecked,
+        // then we don't need to do any further checks.
+        if annotation.adjustment.is_none() || annotation.unchecked {
+            return Ok(());
+        }
+
+        // Do not call `resolve_drop_in_place` because we need param_env.
+        let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
+        let substs = cx.intern_substs(&[ty.into()]);
+        let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            instance.def,
+            ty::InstanceDef::DropGlue(_, Some(_))
+        ));
+
+        let mir = crate::mir::drop_shim::build_drop_shim(cx.tcx, instance.def_id(), param_env, ty);
+        let adjustment_infer = cx.infer_adjustment(param_env, instance, &mir)?;
+        // Check if the inferred adjustment matches the annotation.
+        if let Some(adjustment) = annotation.adjustment {
+            if adjustment != adjustment_infer {
+                let mut diag = cx.sess.struct_span_err(
+                    cx.def_span(instance.def_id()),
+                    format!(
+                        "type annotated to have drop preemption count adjustment of {adjustment}"
+                    ),
+                );
+                diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
+                cx.emit_with_use_site_info(diag);
+            }
+        }
+
+        Ok(())
     }
 );
 
@@ -583,9 +646,9 @@ memoize!(
         }
 
         // Use annotation if available.
-        let annotation = cx.preemption_count_annotation(instance.def_id());
-        if let Some(adj) = annotation.adjustment {
+        if let Some(adj) = cx.preemption_count_annotation(instance.def_id()).adjustment {
             info!("adjustment {} from annotation", adj);
+            return Ok(adj);
         }
 
         if cx
@@ -597,7 +660,7 @@ memoize!(
         {
             // Recursion encountered.
             if param_env.caller_bounds().is_empty() {
-                return Ok(annotation.adjustment.unwrap_or(0));
+                return Ok(0);
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
                 return Err(Error::TooGeneric);
@@ -605,84 +668,7 @@ memoize!(
         }
 
         let mir = cx.analysis_instance_mir(instance.def);
-        let result = if !annotation.unchecked || annotation.adjustment.is_none() {
-            let infer_result = cx.infer_adjustment(param_env, instance, mir);
-            if let Ok(adjustment_infer) = infer_result {
-                // Check if the inferred adjustment matches the annotation.
-                if let Some(adjustment) = annotation.adjustment {
-                    if adjustment != adjustment_infer {
-                        let mut diag = cx.sess.struct_span_err(
-                            cx.def_span(instance.def_id()),
-                            format!("function annotated to have preemption count adjustment of {adjustment}"),
-                        );
-                        diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
-                        cx.emit_with_use_site_info(diag);
-                    }
-                    Ok(adjustment)
-                } else {
-                    Ok(adjustment_infer)
-                }
-            } else {
-                infer_result
-            }
-        } else {
-            Ok(annotation.adjustment.unwrap())
-        };
-
-        // Addition check for trait impl methods.
-        if let Ok(adj) = result &&
-            matches!(instance.def, ty::InstanceDef::Item(_)) &&
-            let Some(impl_) = cx.impl_of_method(instance.def_id()) &&
-            let Some(trait_) = cx.trait_id_of_impl(impl_)
-        {
-            let trait_def = cx.trait_def(trait_);
-            let trait_item = cx
-                .associated_items(impl_)
-                .in_definition_order()
-                .find(|x| x.def_id == instance.def_id())
-                .unwrap()
-                .trait_item_def_id
-                .unwrap();
-            for ancestor in trait_def.ancestors(cx.tcx, impl_).unwrap() {
-                let Some(ancestor_item) = ancestor.item(cx.tcx, trait_item) else { continue };
-                if let Some(ancestor_adj) = cx.preemption_count_annotation(ancestor_item.def_id).adjustment {
-                    if adj != ancestor_adj {
-                        let mut diag = cx.sess.struct_span_err(
-                            cx.def_span(instance.def_id()),
-                            format!("trait method annotated to have preemption count adjustment of {ancestor_adj}"),
-                        );
-                        diag.note(format!("but the adjustment of this implementing function is {adj}"));
-                        diag.span_note(cx.def_span(ancestor_item.def_id), "the trait method is defined here");
-                        cx.emit_with_use_site_info(diag);
-                    }
-                }
-            }
-        }
-
-        // Addition check for FFI functions.
-        // Verify that the inferred result is compatible with the FFI list.
-        if let Ok(adj) = result && cx
-            .codegen_fn_attrs(instance.def_id())
-            .contains_extern_indicator()
-        {
-            // Verify that the inferred result is compatible with the FFI list.
-            let ffi_property = cx.ffi_property(instance);
-
-            if adj != ffi_property.0 {
-                let mut diag = cx.tcx.sess.struct_span_err(
-                    cx.def_span(instance.def_id()),
-                    format!(
-                        "extern function `{}` must have preemption count adjustment {}",
-                        cx.def_path_str(instance.def_id()),
-                        ffi_property.0,
-                    ),
-                );
-                diag.note(format!(
-                    "preemption count adjustment inferred is {adj}",
-                ));
-                diag.emit();
-            }
-        }
+        let result = cx.infer_adjustment(param_env, instance, mir);
 
         // Recursion encountered.
         if let Some(&recur) = cx
@@ -698,9 +684,6 @@ memoize!(
                 (Ok(a), Ok(b)) if a == b => (),
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
                 (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
-                (Ok(_), Ok(_)) if annotation.adjustment.is_some() => {
-                    bug!("recursive outcome does not match annotation")
-                }
                 (Ok(adj), Ok(_)) => {
                     let mut diag = cx.sess.struct_span_err(
                         cx.def_span(instance.def_id()),
@@ -740,6 +723,137 @@ memoize!(
         }
 
         result
+    }
+);
+
+memoize!(
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)), ret)]
+    pub fn instance_adjustment_check<'tcx>(
+        cx: &AnalysisCtxt<'tcx>,
+        poly_instance: ParamEnvAnd<'tcx, Instance<'tcx>>,
+    ) -> Result<(), Error> {
+        let adjustment = cx.instance_adjustment(poly_instance)?;
+        let (param_env, instance) = poly_instance.into_parts();
+
+        // Only check locally codegenned instances.
+        if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
+            return Ok(());
+        }
+
+        match instance.def {
+            // No Rust built-in intrinsics will mess with preemption count.
+            ty::InstanceDef::Intrinsic(_) => return Ok(()),
+            // Empty drop glue, then it definitely won't mess with preemption count.
+            ty::InstanceDef::DropGlue(_, None) => return Ok(()),
+            ty::InstanceDef::DropGlue(_, Some(ty)) => {
+                return cx.drop_adjustment_check(param_env.and(ty));
+            }
+            // Checked by indirect checks
+            ty::InstanceDef::Virtual(_, _) => return Ok(()),
+            _ => (),
+        }
+
+        // Prefer to do polymorphic check if possible.
+        if matches!(instance.def, ty::InstanceDef::Item(_)) {
+            let poly_param_env = cx
+                .param_env_reveal_all_normalized(instance.def_id())
+                .with_constness(Constness::NotConst);
+            let poly_substs =
+                cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
+            let poly_poly_instance =
+                poly_param_env.and(Instance::new(instance.def_id(), poly_substs));
+            let generic = poly_poly_instance == poly_instance;
+            if !generic {
+                match cx.instance_adjustment_check(poly_poly_instance) {
+                    Err(Error::TooGeneric) => (),
+                    result => return result,
+                }
+            }
+        }
+
+        // We need to perform the following checks:
+        // * If there is an annotation, then `instance_adjustment` will just use that annotation.
+        //   We need to make sure that the annotation is correct.
+        // * If trait impl method has annotation, then we need to check that whatever we infer/annotate from
+        //   `instance_adjustment` matches that one.
+        // * If the method is callable from FFI, then we also need to check it matches our FFI adjustment.
+
+        let annotation = cx.preemption_count_annotation(instance.def_id());
+        if let Some(adj) = annotation.adjustment {
+            assert!(adj == adjustment);
+        }
+
+        if annotation.adjustment.is_some() && !annotation.unchecked {
+            let mir = cx.analysis_instance_mir(instance.def);
+            let adjustment_infer = cx.infer_adjustment(param_env, instance, mir)?;
+                // Check if the inferred adjustment matches the annotation.
+                    if adjustment != adjustment_infer {
+                        let mut diag = cx.sess.struct_span_err(
+                            cx.def_span(instance.def_id()),
+                    format!(
+                        "function annotated to have preemption count adjustment of {adjustment}"
+                    ),
+                        );
+                        diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
+                        cx.emit_with_use_site_info(diag);
+                    }
+                }
+
+        // Addition check for trait impl methods.
+        if matches!(instance.def, ty::InstanceDef::Item(_)) &&
+            let Some(impl_) = cx.impl_of_method(instance.def_id()) &&
+            let Some(trait_) = cx.trait_id_of_impl(impl_)
+        {
+            let trait_def = cx.trait_def(trait_);
+            let trait_item = cx
+                .associated_items(impl_)
+                .in_definition_order()
+                .find(|x| x.def_id == instance.def_id())
+                .unwrap()
+                .trait_item_def_id
+                .unwrap();
+            for ancestor in trait_def.ancestors(cx.tcx, impl_).unwrap() {
+                let Some(ancestor_item) = ancestor.item(cx.tcx, trait_item) else { continue };
+                if let Some(ancestor_adj) = cx.preemption_count_annotation(ancestor_item.def_id).adjustment {
+                    if adjustment != ancestor_adj {
+                        let mut diag = cx.sess.struct_span_err(
+                            cx.def_span(instance.def_id()),
+                            format!("trait method annotated to have preemption count adjustment of {ancestor_adj}"),
+                        );
+                        diag.note(format!("but the adjustment of this implementing function is {adjustment}"));
+                        diag.span_note(cx.def_span(ancestor_item.def_id), "the trait method is defined here");
+                        cx.emit_with_use_site_info(diag);
+                    }
+                }
+            }
+        }
+
+        // Addition check for FFI functions.
+        // Verify that the inferred result is compatible with the FFI list.
+        if cx
+            .codegen_fn_attrs(instance.def_id())
+            .contains_extern_indicator()
+        {
+            // Verify that the inferred result is compatible with the FFI list.
+            let ffi_property = cx.ffi_property(instance);
+
+            if adjustment != ffi_property.0 {
+                let mut diag = cx.tcx.sess.struct_span_err(
+                    cx.def_span(instance.def_id()),
+                    format!(
+                        "extern function `{}` must have preemption count adjustment {}",
+                        cx.def_path_str(instance.def_id()),
+                        ffi_property.0,
+                    ),
+                );
+                diag.note(format!(
+                    "preemption count adjustment inferred is {adjustment}",
+                ));
+                diag.emit();
+            }
+        }
+
+        Ok(())
     }
 );
 
