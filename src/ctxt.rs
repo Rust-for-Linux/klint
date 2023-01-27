@@ -7,6 +7,7 @@ use rustc_data_structures::sync::Lrc;
 use rustc_hir::def_id::{CrateNum, LOCAL_CRATE};
 use rustc_middle::ty::TyCtxt;
 use rustc_serialize::{Decodable, Encodable};
+use rustc_span::{Span, DUMMY_SP};
 
 use crate::preempt_count::UseSite;
 
@@ -190,7 +191,11 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             .unwrap();
     }
 
-    pub(crate) fn sql_load<Q: PersistentQuery>(&self, key: Q::Key<'tcx>) -> Option<Q::Value<'tcx>> {
+    pub(crate) fn sql_load_with_span<Q: PersistentQuery>(
+        &self,
+        key: Q::Key<'tcx>,
+        span: Span,
+    ) -> Option<Q::Value<'tcx>> {
         let (cnum, local_key) = Q::into_crate_and_local(key);
 
         let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx);
@@ -206,9 +211,13 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             )
             .optional()
             .unwrap()?;
-        let mut decode_ctx = crate::serde::DecodeContext::new(self.tcx, &value_encoded);
+        let mut decode_ctx = crate::serde::DecodeContext::new(self.tcx, &value_encoded, span);
         let value = Q::decode_value(&mut decode_ctx);
         Some(value)
+    }
+
+    pub(crate) fn sql_load<Q: PersistentQuery>(&self, key: Q::Key<'tcx>) -> Option<Q::Value<'tcx>> {
+        self.sql_load_with_span::<Q>(key, DUMMY_SP)
     }
 
     pub(crate) fn sql_store<Q: PersistentQuery>(&self, key: Q::Key<'tcx>, value: Q::Value<'tcx>) {

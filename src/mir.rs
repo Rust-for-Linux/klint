@@ -115,7 +115,8 @@ memoize!(
     pub fn analysis_mir<'tcx>(cx: &AnalysisCtxt<'tcx>, def_id: DefId) -> &'tcx Body<'tcx> {
         if let Some(local_def_id) = def_id.as_local() {
             local_analysis_mir(cx.tcx, local_def_id)
-        } else if let Some(mir) = cx.sql_load::<analysis_mir>(def_id) {
+        } else if let Some(mir) = cx.sql_load_with_span::<analysis_mir>(def_id, cx.def_span(def_id))
+        {
             mir
         } else {
             cx.optimized_mir(def_id)

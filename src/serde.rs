@@ -156,10 +156,11 @@ pub struct DecodeContext<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     type_shorthands: FxHashMap<usize, Ty<'tcx>>,
     alloc_decoding_state: Lrc<AllocDecodingState>,
+    replacement_span: Span,
 }
 
 impl<'a, 'tcx> DecodeContext<'a, 'tcx> {
-    pub fn new(tcx: TyCtxt<'tcx>, bytes: &'a [u8]) -> Self {
+    pub fn new(tcx: TyCtxt<'tcx>, bytes: &'a [u8], replacement_span: Span) -> Self {
         let vec_position =
             u64::from_le_bytes(bytes[bytes.len() - 8..].try_into().unwrap()) as usize;
         let mut decoder = MemDecoder::new(bytes, vec_position);
@@ -172,6 +173,7 @@ impl<'a, 'tcx> DecodeContext<'a, 'tcx> {
             tcx,
             type_shorthands: Default::default(),
             alloc_decoding_state,
+            replacement_span,
         }
     }
 }
@@ -302,7 +304,7 @@ impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for Span {
                             stable_source_file_id,
                             decoder.tcx.crate_name(stable_source_file_id.cnum)
                         );
-                        DUMMY_SP
+                        decoder.replacement_span
                     }
                 }
             }
