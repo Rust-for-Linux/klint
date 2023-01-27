@@ -62,12 +62,15 @@ declare_tool_lint! {
     ""
 }
 
+pub const FFI_USE_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::single_value(0));
+pub const FFI_DEF_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::top());
+
 pub const INDIRECT_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::single_value(0));
 pub const VDROP_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::top());
 pub const VCALL_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::top());
 
 impl<'tcx> AnalysisCtxt<'tcx> {
-    pub fn ffi_property(&self, instance: Instance<'tcx>) -> (i32, ExpectationRange) {
+    pub fn ffi_property(&self, instance: Instance<'tcx>) -> Option<(i32, ExpectationRange)> {
         const NO_ASSUMPTION: (i32, ExpectationRange) = (0, ExpectationRange::top());
         const MIGHT_SLEEP: (i32, ExpectationRange) = (0, ExpectationRange::single_value(0));
         const SPIN_LOCK: (i32, ExpectationRange) = (1, ExpectationRange::top());
@@ -77,7 +80,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         // Skip LLVM intrinsics
         if symbol.starts_with("llvm.") {
-            return NO_ASSUMPTION;
+            return Some(NO_ASSUMPTION);
         }
 
         // Skip helpers.
@@ -85,7 +88,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             symbol = &symbol["rust_helper_".len()..];
         }
 
-        match symbol {
+        Some(match symbol {
             // Interfacing between libcore and panic runtime
             "rust_begin_unwind" => NO_ASSUMPTION,
             // Basic string operations depended by libcore.
@@ -168,11 +171,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "__might_sleep" | "msleep" => MIGHT_SLEEP,
             _ => {
                 warn!("Unable to determine property for FFI function `{}`", symbol);
-
-                // Other functions, assume no context change for now.
-                NO_ASSUMPTION
+                return None;
             }
-        }
+        })
     }
 }
 

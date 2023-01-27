@@ -630,7 +630,10 @@ memoize!(
         }
 
         if cx.is_foreign_item(instance.def_id()) {
-            return Ok(cx.ffi_property(instance).0);
+            return Ok(cx
+                .ffi_property(instance)
+                .unwrap_or(crate::atomic_context::FFI_USE_DEFAULT)
+                .0);
         }
 
         if !crate::monomorphize_collector::should_codegen_locally(cx.tcx, &instance) {
@@ -835,7 +838,9 @@ memoize!(
             .contains_extern_indicator()
         {
             // Verify that the inferred result is compatible with the FFI list.
-            let ffi_property = cx.ffi_property(instance);
+            let ffi_property = cx
+                .ffi_property(instance)
+                .unwrap_or(crate::atomic_context::FFI_DEF_DEFAULT);
 
             if adjustment != ffi_property.0 {
                 let mut diag = cx.tcx.sess.struct_span_err(
