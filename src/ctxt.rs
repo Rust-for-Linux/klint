@@ -198,7 +198,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     ) -> Option<Q::Value<'tcx>> {
         let (cnum, local_key) = Q::into_crate_and_local(key);
 
-        let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx);
+        let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx, span);
         local_key.encode(&mut encode_ctx);
         let encoded = encode_ctx.finish();
 
@@ -220,15 +220,15 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         self.sql_load_with_span::<Q>(key, DUMMY_SP)
     }
 
-    pub(crate) fn sql_store<Q: PersistentQuery>(&self, key: Q::Key<'tcx>, value: Q::Value<'tcx>) {
+    pub(crate) fn sql_store_with_span<Q: PersistentQuery>(&self, key: Q::Key<'tcx>, value: Q::Value<'tcx>, span: Span) {
         let (cnum, local_key) = Q::into_crate_and_local(key);
         assert!(cnum == LOCAL_CRATE);
 
-        let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx);
+        let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx, span);
         local_key.encode(&mut encode_ctx);
         let key_encoded = encode_ctx.finish();
 
-        let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx);
+        let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx, span);
         Q::encode_value(&value, &mut encode_ctx);
         let value_encoded = encode_ctx.finish();
 
@@ -241,6 +241,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 rusqlite::params![key_encoded, value_encoded],
             )
             .unwrap();
+    }
+
+    pub(crate) fn sql_store<Q: PersistentQuery>(&self, key: Q::Key<'tcx>, value: Q::Value<'tcx>) {
+        self.sql_store_with_span::<Q>(key, value, DUMMY_SP);
     }
 
     pub fn new(tcx: TyCtxt<'tcx>) -> Self {

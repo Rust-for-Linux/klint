@@ -7,7 +7,7 @@ use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_session::StableCrateId;
 use rustc_span::def_id::{CrateNum, DefIndex};
 use rustc_span::source_map::StableSourceFileId;
-use rustc_span::{BytePos, Span, SyntaxContext, DUMMY_SP};
+use rustc_span::{BytePos, Span, SyntaxContext, DUMMY_SP, SourceFile};
 
 pub struct EncodeContext<'tcx> {
     encoder: MemEncoder,
@@ -15,16 +15,18 @@ pub struct EncodeContext<'tcx> {
     type_shorthands: FxHashMap<Ty<'tcx>, usize>,
     predicate_shorthands: FxHashMap<ty::PredicateKind<'tcx>, usize>,
     interpret_allocs: FxIndexSet<AllocId>,
+    relative_file: Lrc<SourceFile>,
 }
 
 impl<'tcx> EncodeContext<'tcx> {
-    pub fn new(tcx: TyCtxt<'tcx>) -> Self {
+    pub fn new(tcx: TyCtxt<'tcx>, span: Span) -> Self {
         Self {
             encoder: MemEncoder::new(),
             tcx,
             type_shorthands: Default::default(),
             predicate_shorthands: Default::default(),
             interpret_allocs: Default::default(),
+            relative_file: tcx.sess.source_map().lookup_byte_offset(span.lo()).sf,
         }
     }
 
@@ -127,6 +129,7 @@ impl<'tcx> Encodable<EncodeContext<'tcx>> for DefIndex {
 
 const TAG_FULL_SPAN: u8 = 0;
 const TAG_PARTIAL_SPAN: u8 = 1;
+const TAG_RELATIVE_SPAN: u8 = 2;
 
 impl<'tcx> Encodable<EncodeContext<'tcx>> for Span {
     fn encode(&self, s: &mut EncodeContext<'tcx>) {
@@ -144,6 +147,13 @@ impl<'tcx> Encodable<EncodeContext<'tcx>> for Span {
             return TAG_PARTIAL_SPAN.encode(s);
         }
 
+        if Lrc::ptr_eq(&pos.sf, &s.relative_file) {
+            TAG_RELATIVE_SPAN.encode(s);
+            (span.lo - s.relative_file.start_pos).encode(s);
+            (span.hi - s.relative_file.start_pos).encode(s);
+            return;
+        }
+
         TAG_FULL_SPAN.encode(s);
         StableSourceFileId::new(&pos.sf).encode(s);
         pos.pos.encode(s);
@@ -157,10 +167,11 @@ pub struct DecodeContext<'a, 'tcx> {
     type_shorthands: FxHashMap<usize, Ty<'tcx>>,
     alloc_decoding_state: Lrc<AllocDecodingState>,
     replacement_span: Span,
+    relative_file: Lrc<SourceFile>,
 }
 
 impl<'a, 'tcx> DecodeContext<'a, 'tcx> {
-    pub fn new(tcx: TyCtxt<'tcx>, bytes: &'a [u8], replacement_span: Span) -> Self {
+    pub fn new(tcx: TyCtxt<'tcx>, bytes: &'a [u8], span: Span) -> Self {
         let vec_position =
             u64::from_le_bytes(bytes[bytes.len() - 8..].try_into().unwrap()) as usize;
         let mut decoder = MemDecoder::new(bytes, vec_position);
@@ -173,7 +184,8 @@ impl<'a, 'tcx> DecodeContext<'a, 'tcx> {
             tcx,
             type_shorthands: Default::default(),
             alloc_decoding_state,
-            replacement_span,
+            replacement_span: span,
+            relative_file: tcx.sess.source_map().lookup_byte_offset(span.lo()).sf,
         }
     }
 }
@@ -307,6 +319,16 @@ impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for Span {
                         decoder.replacement_span
                     }
                 }
+            }
+            TAG_RELATIVE_SPAN => {
+                let lo = BytePos::decode(decoder);
+                let hi = BytePos::decode(decoder);
+                Span::new(
+                    lo + decoder.relative_file.start_pos,
+                    hi + decoder.relative_file.start_pos,
+                    SyntaxContext::root(),
+                    None,
+                )
             }
             TAG_PARTIAL_SPAN => DUMMY_SP,
             _ => unreachable!(),

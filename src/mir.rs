@@ -152,7 +152,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
             if should_encode {
                 let mir = self.analysis_mir(def_id.into());
-                self.sql_store::<analysis_mir>(def_id.into(), mir);
+                self.sql_store_with_span::<analysis_mir>(def_id.into(), mir, tcx.def_span(def_id));
             }
         }
     }
