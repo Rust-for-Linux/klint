@@ -76,6 +76,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         const SPIN_LOCK: (i32, ExpectationRange) = (1, ExpectationRange::top());
         const SPIN_UNLOCK: (i32, ExpectationRange) = (-1, ExpectationRange { lo: 1, hi: None });
 
+        const USE_SPINLOCK: (i32, ExpectationRange) = (0, ExpectationRange::top());
+
         let mut symbol = self.symbol_name(instance).name;
 
         // Skip LLVM intrinsics
@@ -86,6 +88,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         // Skip helpers.
         if symbol.starts_with("rust_helper_") {
             symbol = &symbol["rust_helper_".len()..];
+        }
+
+        // If the name starts with `__` and ends with `_init` or `_exit` then it's the generated
+        // init/exit function for a module. These are sleepable.
+        if symbol.starts_with("__") && (symbol.ends_with("_init") || symbol.ends_with("_exit")) {
+            return Some(MIGHT_SLEEP);
         }
 
         Some(match symbol {
@@ -110,11 +118,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             | "__rg_realloc" => MIGHT_SLEEP,
 
             // Deallocation function will not sleep.
-            "__rust_dealloc" | "__rg_dealloc" => NO_ASSUMPTION,
+            "__rust_dealloc" | "__rg_dealloc" => USE_SPINLOCK,
 
             // What krealloc does depend on flags. Assume it may sleep for conservative purpose.
             "krealloc" => MIGHT_SLEEP,
-            "kfree" => NO_ASSUMPTION,
+            "kfree" => USE_SPINLOCK,
+            "slab_is_available" => NO_ASSUMPTION,
 
             // Error helpers.
             "IS_ERR" | "PTR_ERR" | "errname" => NO_ASSUMPTION,
@@ -162,6 +171,31 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "rcu_read_lock" => SPIN_LOCK,
             "rcu_read_unlock" => SPIN_UNLOCK,
             "synchronize_rcu" => MIGHT_SLEEP,
+
+            // Scheduling related functions.
+            "get_current" | "signal_pending" => NO_ASSUMPTION,
+            "schedule" => MIGHT_SLEEP,
+
+            // Wait
+            "init_wait" => NO_ASSUMPTION,
+            "prepare_to_wait_exclusive" | "finish_wait" => USE_SPINLOCK,
+
+            // Workqueue
+            "__INIT_WORK_WITH_KEY" | "queue_work_on" => NO_ASSUMPTION,
+            "destroy_workqueue" => MIGHT_SLEEP,
+
+            "dev_name" => NO_ASSUMPTION,
+
+            // IRQ handlers
+            "handle_level_irq" | "handle_edge_irq" | "handle_bad_irq" => NO_ASSUMPTION,
+
+            "cdev_alloc" | "cdev_add" | "cdev_del" => MIGHT_SLEEP,
+            "alloc_chrdev_region" | "unregister_chrdev_region" => MIGHT_SLEEP,
+            "clk_get_rate"
+            | "clk_prepare_enable"
+            | "clk_disable_unprepare"
+            | "clk_get"
+            | "clk_put" => MIGHT_SLEEP,
 
             // Params
             "fs_param_is_bool" | "fs_param_is_enum" | "fs_param_is_s32" | "fs_param_is_string"
