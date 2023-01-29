@@ -60,6 +60,22 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         // }
 
         let data = self.def_path(def_id).data;
+
+        if data.len() == 3 &&
+            let DefPathData::TypeNs(any) = data[0].data &&
+            any == sym::any &&
+            let DefPathData::TypeNs(any_trait) = data[1].data &&
+            any_trait == sym::Any &&
+            let DefPathData::ValueNs(_any_fn) = data[2].data
+        {
+            // This is a `core::any::Any::_` function.
+            return PreemptionCount {
+                adjustment: Some(0),
+                expectation: Some(super::ExpectationRange::top()),
+                unchecked: false,
+            };
+        }
+
         if data.len() == 3 &&
             let DefPathData::TypeNs(fmt) = data[0].data &&
             fmt == sym::fmt &&
