@@ -263,7 +263,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         instance: Instance<'tcx>,
         body: &Body<'tcx>,
     ) -> Result<i32, Error> {
-        if false {
+        if self.should_dump_mir(instance.def_id()) {
             rustc_middle::mir::pretty::write_mir_fn(
                 self.tcx,
                 body,

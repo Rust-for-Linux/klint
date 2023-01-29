@@ -31,6 +31,7 @@ pub enum KlintAttribute {
     PreemptionCount(PreemptionCount),
     DropPreemptionCount(PreemptionCount),
     ReportPreeptionCount,
+    DumpMir,
 }
 
 struct Cursor<'a> {
@@ -405,6 +406,7 @@ impl<'tcx> AttrParser<'tcx> {
             v if v == *crate::symbol::report_preempt_count => {
                 Some(KlintAttribute::ReportPreeptionCount)
             }
+            v if v == *crate::symbol::dump_mir => Some(KlintAttribute::DumpMir),
             _ => {
                 self.tcx.struct_span_lint_hir(
                     crate::INCORRECT_ATTRIBUTE,

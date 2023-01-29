@@ -14,6 +14,7 @@ def! {
     preempt_count,
     drop_preempt_count,
     report_preempt_count,
+    dump_mir,
     adjust,
     expect,
     unchecked,
