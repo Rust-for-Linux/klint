@@ -243,7 +243,15 @@ memoize!(
                 }
             }
 
-            ty::Dynamic(..) => {
+            ty::Dynamic(pred, ..) => {
+                if let Some(principal_trait) = pred.principal_def_id() {
+                    if let Some(exp) = cx
+                        .drop_preemption_count_annotation(principal_trait)
+                        .expectation
+                    {
+                        return Ok(exp);
+                    }
+                }
                 return Ok(crate::atomic_context::VDROP_DEFAULT.1);
             }
 

@@ -221,6 +221,10 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
                     ItemKind::Struct(..) | ItemKind::Union(..) | ItemKind::Enum(..) => {
                         (self.adt_callback)(i.hir_id());
                     }
+                    ItemKind::Trait(..) => {
+                        // Not exactly an ADT, but we want to track drop_preempt_count on traits as well.
+                        (self.adt_callback)(i.hir_id());
+                    }
                     _ => (),
                 }
                 hir_visit::walk_item(self, i);

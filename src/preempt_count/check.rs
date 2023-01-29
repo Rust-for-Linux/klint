@@ -25,6 +25,59 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
             .subst_mir_and_normalize_erasing_regions(self.cx.tcx, self.param_env, v)
     }
 
+    fn check_vtable_unsizing(
+        &mut self,
+        source_ty: Ty<'tcx>,
+        target_ty: Ty<'tcx>,
+        span: Span,
+    ) -> Result<(), Error> {
+        let ty::Dynamic(ref source_trait_ref, ..) = source_ty.kind() else { bug!() };
+        let ty::Dynamic(ref target_trait_ref, ..) = target_ty.kind() else { bug!() };
+
+        let source_annotation = source_trait_ref
+            .principal()
+            .map(|x| self.cx.drop_preemption_count_annotation(x.def_id()))
+            .unwrap_or_default();
+        let target_annotation = target_trait_ref
+            .principal()
+            .map(|x| self.cx.drop_preemption_count_annotation(x.def_id()))
+            .unwrap_or_default();
+
+        let source_adjustment = source_annotation
+            .adjustment
+            .unwrap_or(crate::atomic_context::VDROP_DEFAULT.0);
+        let target_adjustment = target_annotation
+            .adjustment
+            .unwrap_or(crate::atomic_context::VDROP_DEFAULT.0);
+        let source_expectation = source_annotation
+            .expectation
+            .unwrap_or(crate::atomic_context::VDROP_DEFAULT.1);
+        let target_expectation = target_annotation
+            .expectation
+            .unwrap_or(crate::atomic_context::VDROP_DEFAULT.1);
+
+        if source_adjustment != target_adjustment
+            || !source_expectation.contains_range(target_expectation)
+        {
+            let mut diag = self.cx.tcx.sess.struct_span_err(
+                span,
+                "casting between traits with incompatible preemption count properties",
+            );
+            diag.help(format!(
+                "adjustment of `{}` is {} and expectation is {}",
+                source_ty, source_adjustment, source_expectation
+            ));
+            diag.help(format!(
+                "while the expected adjustment of `{}` is {} and the expectation is {}",
+                target_ty, target_adjustment, target_expectation
+            ));
+            self.cx.emit_with_use_site_info(diag);
+            return Ok(());
+        }
+
+        Ok(())
+    }
+
     fn check_vtable_construction(
         &mut self,
         ty: Ty<'tcx>,
@@ -78,11 +131,14 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                         source_ty,
                         target_ty,
                     );
-                if let ty::Dynamic(ref trait_ty, ..) = target_ty.kind() &&
-                    !source_ty.is_trait() &&
-                    !source_ty.is_dyn_star()
-                {
-                    self.check_vtable_construction(source_ty, trait_ty.principal(), span)?;
+                if let ty::Dynamic(ref trait_ty, ..) = target_ty.kind() {
+                    if let ty::Dynamic(..) = source_ty.kind() {
+                        // This is trait upcasting.
+                        self.check_vtable_unsizing(source_ty, target_ty, span)?;
+                    } else {
+                        // This is unsizing of a concrete type to a trait object.
+                        self.check_vtable_construction(source_ty, trait_ty.principal(), span)?;
+                    }
                 }
             }
             mir::Rvalue::Cast(
@@ -527,8 +583,9 @@ memoize!(
                                 .struct_warn("constructing this vtable may result in preemption count rule violation")
                         });
                         diag.help(format!(
-                            "`{}` is constructed as part of this vtable",
-                            PolyDisplay(&poly_instance)
+                            "`{}` is constructed as part of `dyn {}`",
+                            PolyDisplay(&poly_instance),
+                            cx.def_path_str(principal.def_id())
                         ));
                         diag.help(format!(
                             "adjustment is inferred to be {} and expectation is inferred to be {}",
@@ -545,19 +602,31 @@ memoize!(
 
         // Check destructor
         let poly_ty = param_env.and(ty);
+
+        let drop_annotation = trait_ref
+            .map(|x| cx.drop_preemption_count_annotation(x.def_id()))
+            .unwrap_or_default();
+        let expected_adjustment = drop_annotation
+            .adjustment
+            .unwrap_or(crate::atomic_context::VCALL_DEFAULT.0);
+        let expected_expectation = drop_annotation
+            .expectation
+            .unwrap_or(crate::atomic_context::VCALL_DEFAULT.1);
+
         let adj = cx.drop_adjustment(poly_ty)?;
         let exp = cx.drop_expectation(poly_ty)?;
-        if adj != crate::atomic_context::VDROP_DEFAULT.0
-            || !exp.contains_range(crate::atomic_context::VDROP_DEFAULT.1)
-        {
+        if adj != expected_adjustment || !exp.contains_range(expected_expectation) {
             let diag = diag.get_or_insert_with(|| {
                 cx.sess.struct_warn(
                     "constructing this vtable may result in preemption count rule violation",
                 )
             });
             diag.help(format!(
-                "drop glue of `{}` is constructed as part of this vtable",
-                PolyDisplay(&poly_ty)
+                "drop glue of `{}` is constructed as part of `dyn {}`",
+                PolyDisplay(&poly_ty),
+                trait_ref
+                    .map(|x| cx.def_path_str(x.def_id()))
+                    .unwrap_or_default()
             ));
             diag.help(format!(
                 "adjustment is inferred to be {} and expectation is inferred to be {}",
@@ -565,8 +634,7 @@ memoize!(
             ));
             diag.help(format!(
                 "while the expected adjustment for vtable is {} and the expectation is {}",
-                crate::atomic_context::VDROP_DEFAULT.0,
-                crate::atomic_context::VDROP_DEFAULT.1
+                expected_adjustment, expected_expectation
             ));
         }
 

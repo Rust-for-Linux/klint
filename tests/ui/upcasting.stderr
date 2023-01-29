@@ -1,0 +1,20 @@
+warning: the feature `trait_upcasting` is incomplete and may not be safe to use and/or cause compiler crashes
+ --> $DIR/upcasting.rs:2:12
+  |
+2 | #![feature(trait_upcasting)]
+  |            ^^^^^^^^^^^^^^^
+  |
+  = note: see issue #65991 <https://github.com/rust-lang/rust/issues/65991> for more information
+  = note: `#[warn(incomplete_features)]` on by default
+
+error: casting between traits with incompatible preemption count properties
+  --> $DIR/upcasting.rs:11:5
+   |
+11 |     x
+   |     ^
+   |
+   = help: adjustment of `dyn B` is 0 and expectation is 1
+   = help: while the expected adjustment of `dyn A` is 0 and the expectation is 0
+
+error: aborting due to previous error; 1 warning emitted
+
