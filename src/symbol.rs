@@ -18,6 +18,7 @@ def! {
     adjust,
     expect,
     unchecked,
+    error,
     write,
     Write,
     Waker,

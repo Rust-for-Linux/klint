@@ -77,6 +77,21 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         }
 
         if data.len() == 3 &&
+            let DefPathData::TypeNs(error) = data[0].data &&
+            error == *crate::symbol::error &&
+            let DefPathData::TypeNs(error_trait) = data[1].data &&
+            error_trait == sym::Error &&
+            let DefPathData::ValueNs(_any_fn) = data[2].data
+        {
+            // This is a `core::error::Error::_` function.
+            return PreemptionCount {
+                adjustment: Some(0),
+                expectation: Some(super::ExpectationRange::top()),
+                unchecked: false,
+            };
+        }
+
+        if data.len() == 3 &&
             let DefPathData::TypeNs(fmt) = data[0].data &&
             fmt == sym::fmt &&
             let DefPathData::TypeNs(_fmt_trait) = data[1].data &&
