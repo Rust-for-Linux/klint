@@ -1,16 +1,450 @@
+use rustc_errors::{EmissionGuarantee, MultiSpan};
 use rustc_hir::def_id::CrateNum;
 use rustc_hir::{Constness, LangItem};
 use rustc_index::bit_set::BitSet;
-use rustc_middle::mir::{Body, TerminatorKind};
+use rustc_middle::mir::{self, Body, TerminatorKind};
 use rustc_middle::ty::{self, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, Ty};
 use rustc_mir_dataflow::lattice::MeetSemiLattice;
 use rustc_mir_dataflow::Analysis;
+use rustc_span::DUMMY_SP;
 
 use super::dataflow::AdjustmentComputation;
 use super::*;
 use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
+    pub fn terminator_expectation(
+        &self,
+        param_env: ParamEnv<'tcx>,
+        instance: Instance<'tcx>,
+        body: &Body<'tcx>,
+        terminator: &mir::Terminator<'tcx>,
+    ) -> Result<ExpectationRange, Error> {
+        Ok(match &terminator.kind {
+            TerminatorKind::Call { func, .. } => {
+                let callee_ty = func.ty(body, self.tcx);
+                let callee_ty = instance
+                    .subst_mir_and_normalize_erasing_regions(self.tcx, param_env, callee_ty);
+                if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
+                    if let Some(v) = self.preemption_count_annotation(def_id).expectation {
+                        // Fast path, no need to resolve the instance.
+                        // This also avoids `TooGeneric` when def_id is an trait method.
+                        v
+                    } else {
+                        let callee_instance =
+                            ty::Instance::resolve(self.tcx, param_env, def_id, substs)
+                                .unwrap()
+                                .ok_or(Error::TooGeneric)?;
+                        self.call_stack.borrow_mut().push(UseSite {
+                            instance: param_env.and(instance),
+                            kind: UseSiteKind::Call(terminator.source_info.span),
+                        });
+                        let result = self.instance_expectation(param_env.and(callee_instance));
+                        self.call_stack.borrow_mut().pop();
+                        result?
+                    }
+                } else {
+                    crate::atomic_context::INDIRECT_DEFAULT.1
+                }
+            }
+            TerminatorKind::Drop { place, .. } => {
+                let ty = place.ty(body, self.tcx).ty;
+                let ty = instance.subst_mir_and_normalize_erasing_regions(self.tcx, param_env, ty);
+
+                self.call_stack.borrow_mut().push(UseSite {
+                    instance: param_env.and(instance),
+                    kind: UseSiteKind::Drop {
+                        drop_span: terminator.source_info.span,
+                        place_span: body.local_decls[place.local].source_info.span,
+                    },
+                });
+                let result = self.drop_expectation(param_env.and(ty));
+                self.call_stack.borrow_mut().pop();
+                result?
+            }
+            _ => ExpectationRange::top(),
+        })
+    }
+
+    #[instrument(skip(self, param_env, body, diag), fields(instance = %PolyDisplay(&param_env.and(instance))), ret)]
+    pub fn report_body_expectation_error<G: EmissionGuarantee>(
+        &self,
+        param_env: ParamEnv<'tcx>,
+        instance: Instance<'tcx>,
+        body: &Body<'tcx>,
+        expected: ExpectationRange,
+        span: Option<MultiSpan>,
+        diag: &mut rustc_errors::DiagnosticBuilder<'_, G>,
+    ) -> Result<(), Error> {
+        let mut analysis_result = AdjustmentComputation {
+            checker: self,
+            body,
+            param_env,
+            instance,
+        }
+        .into_engine(self.tcx, body)
+        .dead_unwinds(&BitSet::new_filled(body.basic_blocks.len()))
+        .iterate_to_fixpoint()
+        .into_results_cursor(body);
+
+        for (b, data) in rustc_middle::mir::traversal::reachable(body) {
+            if data.is_cleanup {
+                continue;
+            }
+
+            let expectation =
+                self.terminator_expectation(param_env, instance, body, data.terminator())?;
+
+            // Special case for no expectation at all. No need to check adjustment here.
+            if expectation == ExpectationRange::top() {
+                continue;
+            }
+
+            analysis_result.seek_to_block_start(b);
+            let adjustment = analysis_result.get().into_result()?;
+
+            let call_expected = expected + adjustment;
+            if expectation.contains_range(call_expected) {
+                continue;
+            }
+
+            // This call violates the expectation rules. Go check further.
+
+            match &data.terminator().kind {
+                TerminatorKind::Call { func, .. } => {
+                    let mut span =
+                        span.unwrap_or_else(|| data.terminator().source_info.span.into());
+                    let callee_ty = func.ty(body, self.tcx);
+                    let callee_ty = instance
+                        .subst_mir_and_normalize_erasing_regions(self.tcx, param_env, callee_ty);
+                    if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
+                        if self.is_foreign_item(def_id) {
+                            if !span.has_primary_spans() {
+                                span = self.def_span(def_id).into();
+                            }
+
+                            let exp = self
+                                .ffi_property(instance)
+                                .unwrap_or(crate::atomic_context::FFI_USE_DEFAULT)
+                                .1;
+                            diag.span_note(
+                                span,
+                                format!(
+                                    "which may perform this FFI call with preemption count {}",
+                                    expected
+                                ),
+                            );
+                            diag.note(format!("but the callee expects preemption count {}", exp));
+                            return Ok(());
+                        }
+
+                        if let Some(v) = self.preemption_count_annotation(def_id).expectation {
+                            if !span.has_primary_spans() {
+                                span = self.def_span(def_id).into();
+                            }
+
+                            diag.span_note(
+                                span,
+                                format!(
+                                    "which may call this function with preemption count {}",
+                                    expected
+                                ),
+                            );
+                            diag.note(format!("but the callee expects preemption count {}", v));
+                            return Ok(());
+                        } else {
+                            let callee_instance =
+                                ty::Instance::resolve(self.tcx, param_env, def_id, substs)
+                                    .unwrap()
+                                    .ok_or(Error::TooGeneric)?;
+
+                            if !span.has_primary_spans() {
+                                span = self.def_span(callee_instance.def_id()).into();
+                            }
+
+                            self.call_stack.borrow_mut().push(UseSite {
+                                instance: param_env.and(instance),
+                                kind: UseSiteKind::Call(span.primary_span().unwrap_or(DUMMY_SP)),
+                            });
+                            let result = self.report_instance_expectation_error(
+                                param_env,
+                                callee_instance,
+                                call_expected,
+                                span,
+                                diag,
+                            );
+                            self.call_stack.borrow_mut().pop();
+                            result?
+                        }
+                    } else {
+                        diag.span_note(
+                            span,
+                            format!(
+                                "which performs indirect function call with preemption count {}",
+                                expected
+                            ),
+                        );
+                        diag.note(format!(
+                            "but indirect function calls are assumed to expect {}",
+                            crate::atomic_context::INDIRECT_DEFAULT.1
+                        ));
+                        return Ok(());
+                    }
+                }
+                TerminatorKind::Drop { place, .. } => {
+                    let span = span.unwrap_or_else(|| {
+                        let mut multispan =
+                            MultiSpan::from_span(data.terminator().source_info.span);
+                        multispan.push_span_label(
+                            body.local_decls[place.local].source_info.span,
+                            "value being dropped is here",
+                        );
+                        multispan
+                    });
+                    let ty = place.ty(body, self.tcx).ty;
+                    let ty =
+                        instance.subst_mir_and_normalize_erasing_regions(self.tcx, param_env, ty);
+
+                    self.call_stack.borrow_mut().push(UseSite {
+                        instance: param_env.and(instance),
+                        kind: UseSiteKind::Drop {
+                            drop_span: data.terminator().source_info.span,
+                            place_span: body.local_decls[place.local].source_info.span,
+                        },
+                    });
+
+                    let result = self.report_drop_expectation_error(
+                        param_env,
+                        ty,
+                        call_expected,
+                        span,
+                        diag,
+                    );
+                    self.call_stack.borrow_mut().pop();
+                    result?;
+                }
+                _ => (),
+            };
+
+            return Ok(());
+        }
+
+        unreachable!()
+    }
+
+    // Expectation error reporting is similar to expectation inference, but the direction is reverted.
+    // For inference, we first determine the range of preemption count of the callee, and then combine
+    // all call-sites to determine the preemption count requirement of the outer function. For reporting,
+    // we have a pre-determined expectation, and then we need to recurse into the callees to find a violation.
+    //
+    // Must only be called on instances that actually are errors.
+    pub fn report_instance_expectation_error<G: EmissionGuarantee>(
+        &self,
+        param_env: ParamEnv<'tcx>,
+        instance: Instance<'tcx>,
+        expected: ExpectationRange,
+        span: MultiSpan,
+        diag: &mut rustc_errors::DiagnosticBuilder<'_, G>,
+    ) -> Result<(), Error> {
+        // let expectation = cx.instance_expectation(param_env.and(instance))?;
+
+        match instance.def {
+            // No Rust built-in intrinsics will mess with preemption count.
+            ty::InstanceDef::Intrinsic(_) => unreachable!(),
+            // Empty drop glue, then it definitely won't mess with preemption count.
+            ty::InstanceDef::DropGlue(_, None) => unreachable!(),
+            ty::InstanceDef::DropGlue(_, Some(ty)) => {
+                return self.report_drop_expectation_error(param_env, ty, expected, span, diag);
+            }
+            // Checked by indirect checks
+            ty::InstanceDef::Virtual(def_id, _) => {
+                let exp = self
+                    .preemption_count_annotation(def_id)
+                    .expectation
+                    .unwrap_or(crate::atomic_context::VCALL_DEFAULT.1);
+                diag.span_note(
+                    span,
+                    format!(
+                        "which may call this dynamic dispatch with preemption count {}",
+                        expected
+                    ),
+                );
+                diag.note(format!(
+                    "but this dynamic dispatch expects preemption count {}",
+                    exp
+                ));
+                return Ok(());
+            }
+            _ => (),
+        }
+
+        // Only check locally codegenned instances.
+        if !crate::monomorphize_collector::should_codegen_locally(self.tcx, &instance) {
+            let expectation = self.instance_expectation(param_env.and(instance))?;
+            diag.span_note(
+                span,
+                format!(
+                    "which may call this function with preemption count {}",
+                    expected
+                ),
+            );
+            diag.note(format!(
+                "but this function expects preemption count {}",
+                expectation
+            ));
+            return Ok(());
+        }
+
+        diag.span_note(
+            span,
+            format!(
+                "which may call this function with preemption count {}",
+                expected
+            ),
+        );
+
+        let body = self.analysis_instance_mir(instance.def);
+        self.report_body_expectation_error(param_env, instance, body, expected, None, diag)
+    }
+
+    pub fn report_drop_expectation_error<G: EmissionGuarantee>(
+        &self,
+        param_env: ParamEnv<'tcx>,
+        ty: Ty<'tcx>,
+        expected: ExpectationRange,
+        span: MultiSpan,
+        diag: &mut rustc_errors::DiagnosticBuilder<'_, G>,
+    ) -> Result<(), Error> {
+        // If the type doesn't need drop, then there is trivially no expectation.
+        assert!(ty.needs_drop(self.tcx, param_env));
+
+        match ty.kind() {
+            ty::Closure(_, substs) => {
+                return self.report_drop_expectation_error(
+                    param_env,
+                    substs.as_closure().tupled_upvars_ty(),
+                    expected,
+                    span,
+                    diag,
+                );
+            }
+
+            // Generator drops are non-trivial, use the generated drop shims instead.
+            ty::Generator(..) => (),
+
+            ty::Tuple(_list) => (),
+
+            ty::Adt(def, substs) if def.is_box() => {
+                let exp = self.drop_expectation(param_env.and(substs.type_at(0)))?;
+                if !exp.contains_range(expected) {
+                    return self.report_drop_expectation_error(
+                        param_env,
+                        substs.type_at(0),
+                        expected,
+                        span,
+                        diag,
+                    );
+                }
+                let adj = self.drop_adjustment(param_env.and(substs.type_at(0)))?;
+
+                let box_free = self.require_lang_item(LangItem::BoxFree, None);
+                let box_free_inst = Instance::new(box_free, substs);
+                return self.report_instance_expectation_error(
+                    param_env,
+                    box_free_inst,
+                    expected + AdjustmentBounds::single_value(adj),
+                    span,
+                    diag,
+                );
+            }
+
+            ty::Adt(def, _) => {
+                if let Some(exp) = self.drop_preemption_count_annotation(def.did()).expectation {
+                    diag.span_note(
+                        span,
+                        format!("which may drop here with preemption count {}", expected),
+                    );
+                    diag.note(format!("but this drop expects preemption count {}", exp));
+                    return Ok(());
+                }
+            }
+
+            ty::Dynamic(pred, ..) => {
+                let exp = pred
+                    .principal_def_id()
+                    .and_then(|principal_trait| {
+                        self.drop_preemption_count_annotation(principal_trait)
+                            .expectation
+                    })
+                    .unwrap_or(crate::atomic_context::VDROP_DEFAULT.1);
+                diag.span_note(
+                    span,
+                    format!("which may drop here with preemption count {}", expected),
+                );
+                diag.note(format!("but this drop expects preemption count {}", exp));
+                return Ok(());
+            }
+
+            ty::Array(elem_ty, size) => {
+                let param_and_elem_ty = param_env.and(*elem_ty);
+                let elem_exp = self.drop_expectation(param_and_elem_ty)?;
+                if !elem_exp.contains_range(expected) {
+                    return self
+                        .report_drop_expectation_error(param_env, *elem_ty, expected, span, diag);
+                }
+
+                let elem_adj = self.drop_adjustment(param_and_elem_ty)?;
+                let size = size
+                    .try_eval_usize(self.tcx, param_env)
+                    .ok_or(Error::TooGeneric)?;
+                let Ok(size) = i32::try_from(size) else { return Ok(()); };
+                let Some(last_adj) = (size - 1).checked_mul(elem_adj) else { return Ok(()); };
+                let last_adj_bound = AdjustmentBounds::single_value(last_adj);
+                return self.report_drop_expectation_error(
+                    param_env,
+                    *elem_ty,
+                    expected + last_adj_bound,
+                    span,
+                    diag,
+                );
+            }
+
+            ty::Slice(elem_ty) => {
+                return self
+                    .report_drop_expectation_error(param_env, *elem_ty, expected, span, diag);
+            }
+
+            _ => unreachable!(),
+        }
+
+        diag.span_note(
+            span,
+            format!(
+                "which may drop type `{}` with preemption count {}",
+                PolyDisplay(&param_env.and(ty)),
+                expected,
+            ),
+        );
+        let span = MultiSpan::new();
+
+        // Do not call `resolve_drop_in_place` because we need param_env.
+        let drop_in_place = self.require_lang_item(LangItem::DropInPlace, None);
+        let substs = self.intern_substs(&[ty.into()]);
+        let instance = ty::Instance::resolve(self.tcx, param_env, drop_in_place, substs)
+            .unwrap()
+            .unwrap();
+
+        let mir = crate::mir::drop_shim::build_drop_shim(self, instance.def_id(), param_env, ty);
+        return self.report_body_expectation_error(
+            param_env,
+            instance,
+            &mir,
+            expected,
+            Some(span),
+            diag,
+        );
+    }
+
     pub fn do_infer_expectation(
         &self,
         param_env: ParamEnv<'tcx>,
@@ -677,8 +1111,14 @@ memoize!(
             assert!(exp == expectation);
         }
 
+        let body = if annotation.expectation.is_none() || !annotation.unchecked {
+            Some(cx.analysis_instance_mir(instance.def))
+        } else {
+            None
+        };
+
         if annotation.expectation.is_some() && !annotation.unchecked {
-            let mir = cx.analysis_instance_mir(instance.def);
+            let mir = body.unwrap();
             let expectation_infer = cx.infer_expectation(param_env, instance, mir)?;
             // Check if the inferred expectation matches the annotation.
             if !expectation_infer.contains_range(expectation) {
@@ -692,6 +1132,15 @@ memoize!(
                 diag.note(format!(
                     "but the expectation inferred is {expectation_infer}"
                 ));
+                cx.report_body_expectation_error(
+                    param_env,
+                    instance,
+                    mir,
+                    expectation,
+                    None,
+                    &mut diag,
+                )
+                .unwrap();
                 diag.emit();
             }
         }
@@ -719,6 +1168,17 @@ memoize!(
                         );
                         diag.note(format!("but the expectation of this implementing function is {expectation}"));
                         diag.span_note(cx.def_span(ancestor_item.def_id), "the trait method is defined here");
+                        if let Some(body) = body {
+                            cx.report_body_expectation_error(
+                                param_env,
+                                instance,
+                                body,
+                                ancestor_exp,
+                                None,
+                                &mut diag,
+                            )
+                            .unwrap();
+                        }
                         cx.emit_with_use_site_info(diag);
                     }
                 }
@@ -749,6 +1209,17 @@ memoize!(
                 diag.note(format!(
                     "preemption count expectation inferred is {expectation}",
                 ));
+                if let Some(body) = body {
+                    cx.report_body_expectation_error(
+                        param_env,
+                        instance,
+                        body,
+                        ffi_property.1,
+                        None,
+                        &mut diag,
+                    )
+                    .unwrap();
+                }
                 diag.emit();
             }
         }
