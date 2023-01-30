@@ -66,8 +66,8 @@ pub const FFI_USE_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::singl
 pub const FFI_DEF_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::top());
 
 pub const INDIRECT_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::single_value(0));
-pub const VDROP_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::top());
-pub const VCALL_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::top());
+pub const VDROP_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::single_value(0));
+pub const VCALL_DEFAULT: (i32, ExpectationRange) = (0, ExpectationRange::single_value(0));
 
 impl<'tcx> AnalysisCtxt<'tcx> {
     pub fn ffi_property(&self, instance: Instance<'tcx>) -> Option<(i32, ExpectationRange)> {
