@@ -608,10 +608,10 @@ memoize!(
             .unwrap_or_default();
         let expected_adjustment = drop_annotation
             .adjustment
-            .unwrap_or(crate::atomic_context::VCALL_DEFAULT.0);
+            .unwrap_or(crate::atomic_context::VDROP_DEFAULT.0);
         let expected_expectation = drop_annotation
             .expectation
-            .unwrap_or(crate::atomic_context::VCALL_DEFAULT.1);
+            .unwrap_or(crate::atomic_context::VDROP_DEFAULT.1);
 
         let adj = cx.drop_adjustment(poly_ty)?;
         let exp = cx.drop_expectation(poly_ty)?;

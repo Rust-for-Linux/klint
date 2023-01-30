@@ -7,7 +7,7 @@ use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_session::StableCrateId;
 use rustc_span::def_id::{CrateNum, DefIndex};
 use rustc_span::source_map::StableSourceFileId;
-use rustc_span::{BytePos, Span, SyntaxContext, DUMMY_SP, SourceFile};
+use rustc_span::{BytePos, SourceFile, Span, SyntaxContext, DUMMY_SP};
 
 pub struct EncodeContext<'tcx> {
     encoder: MemEncoder,
