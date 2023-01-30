@@ -220,7 +220,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         self.sql_load_with_span::<Q>(key, DUMMY_SP)
     }
 
-    pub(crate) fn sql_store_with_span<Q: PersistentQuery>(&self, key: Q::Key<'tcx>, value: Q::Value<'tcx>, span: Span) {
+    pub(crate) fn sql_store_with_span<Q: PersistentQuery>(
+        &self,
+        key: Q::Key<'tcx>,
+        value: Q::Value<'tcx>,
+        span: Span,
+    ) {
         let (cnum, local_key) = Q::into_crate_and_local(key);
         assert!(cnum == LOCAL_CRATE);
 

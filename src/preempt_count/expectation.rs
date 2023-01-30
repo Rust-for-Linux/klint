@@ -118,26 +118,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let callee_ty = instance
                         .subst_mir_and_normalize_erasing_regions(self.tcx, param_env, callee_ty);
                     if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
-                        if self.is_foreign_item(def_id) {
-                            if !span.has_primary_spans() {
-                                span = self.def_span(def_id).into();
-                            }
-
-                            let exp = self
-                                .ffi_property(instance)
-                                .unwrap_or(crate::atomic_context::FFI_USE_DEFAULT)
-                                .1;
-                            diag.span_note(
-                                span,
-                                format!(
-                                    "which may perform this FFI call with preemption count {}",
-                                    expected
-                                ),
-                            );
-                            diag.note(format!("but the callee expects preemption count {}", exp));
-                            return Ok(());
-                        }
-
                         if let Some(v) = self.preemption_count_annotation(def_id).expectation {
                             if !span.has_primary_spans() {
                                 span = self.def_span(def_id).into();
@@ -276,6 +256,22 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 return Ok(());
             }
             _ => (),
+        }
+
+        if self.is_foreign_item(instance.def_id()) {
+            let exp = self
+                .ffi_property(instance)
+                .unwrap_or(crate::atomic_context::FFI_USE_DEFAULT)
+                .1;
+            diag.span_note(
+                span,
+                format!(
+                    "which may perform this FFI call with preemption count {}",
+                    expected
+                ),
+            );
+            diag.note(format!("but the callee expects preemption count {}", exp));
+            return Ok(());
         }
 
         // Only check locally codegenned instances.
