@@ -43,7 +43,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 let DefPathData::TypeNs(waker) = data[2].data &&
                 waker == *crate::symbol::Waker
             {
-                if fn_name == *crate::symbol::wake
+                if fn_name == sym::clone
+                    || fn_name == *crate::symbol::wake
                     || fn_name == *crate::symbol::wake_by_ref
                 {
                     return PreemptionCount {
