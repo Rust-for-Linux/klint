@@ -22,42 +22,40 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     }
 
     fn core_out_of_band_annotation(&self, def_id: DefId) -> PreemptionCount {
-        // if self.def_kind(def_id) == DefKind::AssocFn &&
-        //     let Some(impl_) = self.impl_of_method(def_id)
-        // {
-        //     let self_ty = self.type_of(impl_);
-        //     let Some(fn_name) = self.def_path(def_id).data.last().copied() else {
-        //         return Default::default();
-        //     };
-        //     let DefPathData::ValueNs(fn_name) = fn_name.data else {
-        //         return Default::default();
-        //     };
+        if self.def_kind(def_id) == DefKind::AssocFn &&
+            let Some(impl_) = self.impl_of_method(def_id)
+        {
+            let self_ty = self.type_of(impl_);
+            let Some(fn_name) = self.def_path(def_id).data.last().copied() else {
+                return Default::default();
+            };
+            let DefPathData::ValueNs(fn_name) = fn_name.data else {
+                return Default::default();
+            };
 
-        //     if let Some(adt_def) = self_ty.ty_adt_def() &&
-        //         let data = self.def_path(adt_def.did()).data &&
-        //         data.len() == 3 &&
-        //         let DefPathData::TypeNs(task) = data[0].data &&
-        //         task == sym::task &&
-        //         let DefPathData::TypeNs(wake) = data[1].data &&
-        //         wake == *crate::symbol::wake &&
-        //         let DefPathData::TypeNs(waker) = data[2].data &&
-        //         waker == *crate::symbol::Waker
-        //     {
-        //         if fn_name == sym::drop
-        //             || fn_name == sym::clone
-        //             || fn_name == *crate::symbol::wake
-        //             || fn_name == *crate::symbol::wake_by_ref
-        //         {
-        //             return PreemptionCount {
-        //                 adjustment: Some(0),
-        //                 expectation: Some(super::ExpectationRange::top()),
-        //                 unchecked: true,
-        //             };
-        //         }
-        //     }
+            if let Some(adt_def) = self_ty.ty_adt_def() &&
+                let data = self.def_path(adt_def.did()).data &&
+                data.len() == 3 &&
+                let DefPathData::TypeNs(task) = data[0].data &&
+                task == sym::task &&
+                let DefPathData::TypeNs(wake) = data[1].data &&
+                wake == *crate::symbol::wake &&
+                let DefPathData::TypeNs(waker) = data[2].data &&
+                waker == *crate::symbol::Waker
+            {
+                if fn_name == *crate::symbol::wake
+                    || fn_name == *crate::symbol::wake_by_ref
+                {
+                    return PreemptionCount {
+                        adjustment: Some(0),
+                        expectation: Some(super::ExpectationRange::top()),
+                        unchecked: true,
+                    };
+                }
+            }
 
-        //     return Default::default();
-        // }
+            return Default::default();
+        }
 
         let data = self.def_path(def_id).data;
 
