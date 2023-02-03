@@ -563,6 +563,15 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     expectation_infer + adjustment
                 ));
 
+                self.report_instance_expectation_error(
+                    param_env,
+                    instance,
+                    expectation_infer + adjustment,
+                    span.into(),
+                    &mut diag,
+                )
+                .unwrap();
+
                 // Stop processing other calls in this function to avoid generating too many errors.
                 return Err(Error::Error(self.emit_with_use_site_info(diag)));
             }

@@ -165,7 +165,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // Mutex functions.
             "__init_rwsem" | "__mutex_init" => NO_ASSUMPTION,
             "down_read" | "down_write" | "mutex_lock" | "kernel_param_lock" => MIGHT_SLEEP,
-            "up_read" | "up_write" | "mutex_unlock" | "kernel_param_unlock" => NO_ASSUMPTION,
+            "up_read" | "up_write" | "mutex_unlock" | "kernel_param_unlock" => MIGHT_SLEEP,
 
             // RCU
             "rcu_read_lock" => SPIN_LOCK,
@@ -179,6 +179,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // Wait
             "init_wait" => NO_ASSUMPTION,
             "prepare_to_wait_exclusive" | "finish_wait" => USE_SPINLOCK,
+            "init_waitqueue_func_entry" => NO_ASSUMPTION,
+            "add_wait_queue" | "remove_wait_queue" => USE_SPINLOCK,
 
             // Workqueue
             "__INIT_WORK_WITH_KEY" | "queue_work_on" => NO_ASSUMPTION,
