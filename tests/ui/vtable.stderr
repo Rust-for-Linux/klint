@@ -4,24 +4,23 @@ warning: constructing this vtable may result in preemption count rule violation
 32 |     let a: &'static dyn MyTrait = &Bad;
    |                                   ^^^^
    |
-   = help: `<Bad as MyTrait>::foo` is constructed as part of this vtable
+   = help: `<Bad as MyTrait>::foo` is constructed as part of `dyn MyTrait`
    = help: adjustment is inferred to be 1 and expectation is inferred to be 0..
-   = help: while the expected adjustment for vtable is 0 and the expectation is 0..
+   = help: while the expected adjustment for vtable is 0 and the expectation is 0
 
 WARN klint::ctxt no klint metadata found for crate alloc
 WARN klint::ctxt no klint metadata found for crate core
 WARN klint::preempt_count::adjustment Unable to compute adjustment of non-local function Instance { def: Item(WithOptConstParam { did: DefId(5:178 ~ alloc[d987]::alloc::handle_alloc_error), const_param_did: None }), substs: [] }
 WARN klint::preempt_count::expectation Unable to compute property of non-local function Instance { def: Item(WithOptConstParam { did: DefId(5:178 ~ alloc[d987]::alloc::handle_alloc_error), const_param_did: None }), substs: [] }
-WARN klint::preempt_count::check_indirect Unable to check non-local function Instance { def: Item(WithOptConstParam { did: DefId(5:178 ~ alloc[d987]::alloc::handle_alloc_error), const_param_did: None }), substs: [] }
 warning: constructing this vtable may result in preemption count rule violation
   --> $DIR/vtable.rs:50:32
    |
 50 |     let _a: Box<dyn MyTrait> = Box::new(BadDrop);
    |                                ^^^^^^^^^^^^^^^^^
    |
-   = help: drop glue of `BadDrop` is constructed as part of this vtable
+   = help: drop glue of `BadDrop` is constructed as part of `dyn MyTrait`
    = help: adjustment is inferred to be 1 and expectation is inferred to be 0..
-   = help: while the expected adjustment for vtable is 0 and the expectation is 0..
+   = help: while the expected adjustment for vtable is 0 and the expectation is 0
 
 error: trait method annotated to have preemption count adjustment of 1
   --> $DIR/vtable.rs:75:5
@@ -42,9 +41,9 @@ warning: constructing this vtable may result in preemption count rule violation
 80 |     let a: &'static dyn AnnotatedTrait = &AnnotatedBad;
    |                                          ^^^^^^^^^^^^^
    |
-   = help: `<AnnotatedBad as AnnotatedTrait>::foo` is constructed as part of this vtable
+   = help: `<AnnotatedBad as AnnotatedTrait>::foo` is constructed as part of `dyn AnnotatedTrait`
    = help: adjustment is inferred to be 0 and expectation is inferred to be 0..
-   = help: while the expected adjustment for vtable is 1 and the expectation is 0..
+   = help: while the expected adjustment for vtable is 1 and the expectation is 0
 
 error: aborting due to previous error; 3 warnings emitted
 

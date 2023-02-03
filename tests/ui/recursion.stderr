@@ -7,5 +7,9 @@ error: this function is recursive but preemption count expectation is not 0..
    = note: expectation is inferred to be 0
    = help: try annotate the function with `#[klint::preempt_count(expect = 0)]`
 
+WARN klint::ctxt no klint metadata found for crate alloc
+WARN klint::ctxt no klint metadata found for crate core
+WARN klint::preempt_count::adjustment Unable to compute adjustment of non-local function Instance { def: Item(WithOptConstParam { did: DefId(2:9600 ~ core[b97a]::panicking::panic_fmt), const_param_did: None }), substs: [] }
+WARN klint::preempt_count::expectation Unable to compute property of non-local function Instance { def: Item(WithOptConstParam { did: DefId(2:9600 ~ core[b97a]::panicking::panic_fmt), const_param_did: None }), substs: [] }
 error: aborting due to previous error
 
