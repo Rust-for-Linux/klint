@@ -5,19 +5,18 @@ Lints for kernel or embedded system development.
 
 ## Installation and Usage
 
-You'll first need to install `rustc-dev` and `llvm-tools-preview` through rustup:
+Clone the repository and run `cargo install`:
 ```console
-$ rustup component add rustc-dev llvm-tools-preview
+git clone https://github.com/nbdd0121/klint.git
+cd klint
+cargo install --path .
 ```
 
-Then install via Cargo:
-```console
-$ cargo install --git https://github.com/nbdd0121/klint.git
-```
+Note that klint currently is based on Rust 1.66 so it is likely that running `cargo install --git` will not work as it will not use the `rust-toolchain` file in the repository.
 
 To run this tool, use rustup which will prepare the necessary environment variables:
 ```
-rustup run nightly klint
+rustup run 1.66.0 klint
 ```
 
 `klint` will behave like rustc, just with additional lints.
