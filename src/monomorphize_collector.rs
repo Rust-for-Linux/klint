@@ -17,6 +17,7 @@ use rustc_middle::mir::visit::Visitor as MirVisitor;
 use rustc_middle::mir::{self, Local, Location};
 use rustc_middle::ty::adjustment::{CustomCoerceUnsized, PointerCast};
 use rustc_middle::ty::print::with_no_trimmed_paths;
+use rustc_middle::ty::query::TyCtxtAt;
 use rustc_middle::ty::subst::{GenericArgKind, InternalSubsts};
 use rustc_middle::ty::{
     self, GenericParamDefKind, Instance, Ty, TyCtxt, TypeFoldable, TypeVisitable, VtblEntry,
@@ -26,23 +27,18 @@ use rustc_session::config::EntryFnType;
 use rustc_session::Limit;
 use rustc_span::source_map::{dummy_spanned, respan, Span, Spanned, DUMMY_SP};
 use rustc_trait_selection::traits;
-use std::iter;
 use std::ops::Range;
 use std::path::PathBuf;
 
-// From rustc_mir/monomorphize/mod.rs
+// From rustc_monomorphize/lib.rs
 fn custom_coerce_unsize_info<'tcx>(
-    tcx: TyCtxt<'tcx>,
+    tcx: TyCtxtAt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     source_ty: Ty<'tcx>,
     target_ty: Ty<'tcx>,
 ) -> CustomCoerceUnsized {
-    let def_id = tcx.require_lang_item(LangItem::CoerceUnsized, None);
-
-    let trait_ref = ty::Binder::dummy(ty::TraitRef {
-        def_id,
-        substs: tcx.mk_substs_trait(source_ty, [target_ty.into()]),
-    });
+    let trait_ref =
+        ty::Binder::dummy(tcx.mk_trait_ref(LangItem::CoerceUnsized, [source_ty, target_ty]));
 
     match tcx.codegen_select_candidate((param_env, trait_ref)) {
         Ok(traits::ImplSource::UserDefined(traits::ImplSourceUserDefinedData {
@@ -359,29 +355,23 @@ fn collect_items_rec<'tcx>(
 }
 
 /// Format instance name that is already known to be too long for rustc.
-/// Show only the first and last 32 characters to avoid blasting
+/// Show only the first 2 types if it is longer than 32 characters to avoid blasting
 /// the user's terminal with thousands of lines of type-name.
 ///
 /// If the type name is longer than before+after, it will be written to a file.
 fn shrunk_instance_name<'tcx>(
     tcx: TyCtxt<'tcx>,
     instance: &Instance<'tcx>,
-    before: usize,
-    after: usize,
 ) -> (String, Option<PathBuf>) {
     let s = instance.to_string();
 
     // Only use the shrunk version if it's really shorter.
     // This also avoids the case where before and after slices overlap.
-    if s.chars().nth(before + after + 1).is_some() {
-        // An iterator of all byte positions including the end of the string.
-        let positions = || s.char_indices().map(|(i, _)| i).chain(iter::once(s.len()));
-
-        let shrunk = format!(
-            "{before}...{after}",
-            before = &s[..positions().nth(before).unwrap_or(s.len())],
-            after = &s[positions().rev().nth(after).unwrap_or(0)..],
-        );
+    if s.chars().nth(33).is_some() {
+        let shrunk = format!("{}", ty::ShortInstance(instance, 4));
+        if shrunk == s {
+            return (s, None);
+        }
 
         let path = tcx
             .output_filenames(())
@@ -419,7 +409,7 @@ fn check_recursion_limit<'tcx>(
     if !recursion_limit.value_within_limit(adjusted_recursion_depth) {
         let def_span = tcx.def_span(def_id);
         let def_path_str = tcx.def_path_str(def_id);
-        let (shrunk, written_to_path) = shrunk_instance_name(tcx, &instance, 32, 32);
+        let (shrunk, written_to_path) = shrunk_instance_name(tcx, &instance);
         let error = format!(
             "reached the recursion limit while instantiating `{}`",
             shrunk
@@ -459,7 +449,7 @@ fn check_type_length_limit<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) {
     //
     // Bail out in these cases to avoid that bad user experience.
     if !tcx.type_length_limit().value_within_limit(type_length) {
-        let (shrunk, written_to_path) = shrunk_instance_name(tcx, &instance, 32, 32);
+        let (shrunk, written_to_path) = shrunk_instance_name(tcx, &instance);
         let msg = format!(
             "reached the type-length limit while instantiating `{}`",
             shrunk
@@ -522,7 +512,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
                 let source_ty = operand.ty(self.body, self.tcx);
                 let source_ty = self.monomorphize(source_ty);
                 let (source_ty, target_ty) = find_vtable_types_for_unsizing(
-                    self.tcx,
+                    self.tcx.at(span),
                     ty::ParamEnv::reveal_all(),
                     source_ty,
                     target_ty,
@@ -670,7 +660,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
             mir::TerminatorKind::Abort { .. } => {
                 let instance = Instance::mono(
                     tcx,
-                    tcx.require_lang_item(LangItem::PanicNoUnwind, Some(source)),
+                    tcx.require_lang_item(LangItem::PanicCannotUnwind, Some(source)),
                 );
                 self.output.push(create_fn_mono_item(tcx, instance, source));
             }
@@ -721,12 +711,13 @@ fn visit_fn_use<'tcx>(
 ) {
     if let ty::FnDef(def_id, substs) = *ty.kind() {
         let instance = if is_direct_call {
-            ty::Instance::resolve(tcx, ty::ParamEnv::reveal_all(), def_id, substs)
-                .unwrap()
-                .unwrap()
+            ty::Instance::expect_resolve(tcx, ty::ParamEnv::reveal_all(), def_id, substs)
         } else {
-            ty::Instance::resolve_for_fn_ptr(tcx, ty::ParamEnv::reveal_all(), def_id, substs)
-                .unwrap()
+            match ty::Instance::resolve_for_fn_ptr(tcx, ty::ParamEnv::reveal_all(), def_id, substs)
+            {
+                Some(instance) => instance,
+                _ => bug!("failed to resolve instance for {ty}"),
+            }
         };
         visit_instance_use(tcx, instance, is_direct_call, source, output);
     }
@@ -849,14 +840,14 @@ pub fn should_codegen_locally<'tcx>(tcx: TyCtxt<'tcx>, instance: &Instance<'tcx>
 /// Finally, there is also the case of custom unsizing coercions, e.g., for
 /// smart pointers such as `Rc` and `Arc`.
 pub fn find_vtable_types_for_unsizing<'tcx>(
-    tcx: TyCtxt<'tcx>,
+    tcx: TyCtxtAt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     source_ty: Ty<'tcx>,
     target_ty: Ty<'tcx>,
 ) -> (Ty<'tcx>, Ty<'tcx>) {
     let ptr_vtable = |inner_source: Ty<'tcx>, inner_target: Ty<'tcx>| {
         let type_has_metadata = |ty: Ty<'tcx>| -> bool {
-            if ty.is_sized(tcx, param_env) {
+            if ty.is_sized(tcx.tcx, param_env) {
                 return false;
             }
             let tail = tcx.struct_tail_erasing_lifetimes(ty, param_env);
@@ -901,8 +892,8 @@ pub fn find_vtable_types_for_unsizing<'tcx>(
             find_vtable_types_for_unsizing(
                 tcx,
                 param_env,
-                source_fields[coerce_index].ty(tcx, source_substs),
-                target_fields[coerce_index].ty(tcx, target_substs),
+                source_fields[coerce_index].ty(*tcx, source_substs),
+                target_fields[coerce_index].ty(*tcx, target_substs),
             )
         }
         _ => bug!(
@@ -976,28 +967,15 @@ impl<'v> RootCollector<'_, 'v> {
     fn process_item(&mut self, id: hir::ItemId) {
         match self.tcx.def_kind(id.owner_id) {
             DefKind::Enum | DefKind::Struct | DefKind::Union => {
-                let item = self.tcx.hir().item(id);
-                match item.kind {
-                    hir::ItemKind::Enum(_, ref generics)
-                    | hir::ItemKind::Struct(_, ref generics)
-                    | hir::ItemKind::Union(_, ref generics) => {
-                        if generics.params.is_empty() {
-                            if self.mode == MonoItemCollectionMode::Eager {
-                                debug!(
-                                    "RootCollector: ADT drop-glue for {}",
-                                    self.tcx.def_path_str(item.owner_id.to_def_id())
-                                );
+                if self.mode == MonoItemCollectionMode::Eager
+                    && self.tcx.generics_of(id.owner_id).count() == 0
+                {
+                    debug!("RootCollector: ADT drop-glue for {id:?}",);
 
-                                let ty = Instance::new(
-                                    item.owner_id.to_def_id(),
-                                    InternalSubsts::empty(),
-                                )
-                                .ty(self.tcx, ty::ParamEnv::reveal_all());
-                                visit_drop_use(self.tcx, ty, true, DUMMY_SP, self.output);
-                            }
-                        }
-                    }
-                    _ => bug!(),
+                    let item = self.tcx.hir().item(id);
+                    let ty = Instance::new(item.owner_id.to_def_id(), InternalSubsts::empty())
+                        .ty(self.tcx, ty::ParamEnv::reveal_all());
+                    visit_drop_use(self.tcx, ty, true, DUMMY_SP, self.output);
                 }
             }
             DefKind::GlobalAsm => {
@@ -1024,10 +1002,9 @@ impl<'v> RootCollector<'_, 'v> {
                     collect_const_value(self.tcx, val, &mut self.output);
                 }
             }
-            DefKind::Impl => {
+            DefKind::Impl { .. } => {
                 if self.mode == MonoItemCollectionMode::Eager {
-                    let item = self.tcx.hir().item(id);
-                    create_mono_items_for_default_impls(self.tcx, item, self.output);
+                    create_mono_items_for_default_impls(self.tcx, id, self.output);
                 }
             }
             DefKind::Fn => {
@@ -1115,65 +1092,55 @@ fn item_requires_monomorphization(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
 
 fn create_mono_items_for_default_impls<'tcx>(
     tcx: TyCtxt<'tcx>,
-    item: &'tcx hir::Item<'tcx>,
+    item: hir::ItemId,
     output: &mut Vec<Spanned<MonoItem<'tcx>>>,
 ) {
-    match item.kind {
-        hir::ItemKind::Impl(ref impl_) => {
-            if matches!(impl_.polarity, hir::ImplPolarity::Negative(_)) {
-                return;
-            }
+    let polarity = tcx.impl_polarity(item.owner_id);
+    if matches!(polarity, ty::ImplPolarity::Negative) {
+        return;
+    }
 
-            for param in impl_.generics.params {
-                match param.kind {
-                    hir::GenericParamKind::Lifetime { .. } => {}
-                    hir::GenericParamKind::Type { .. } | hir::GenericParamKind::Const { .. } => {
-                        return;
-                    }
-                }
-            }
+    if tcx
+        .generics_of(item.owner_id)
+        .own_requires_monomorphization()
+    {
+        return;
+    }
 
-            debug!(
-                "create_mono_items_for_default_impls(item={})",
-                tcx.def_path_str(item.owner_id.to_def_id())
-            );
+    let Some(trait_ref) = tcx.impl_trait_ref(item.owner_id) else {
+        return;
+    };
 
-            if let Some(trait_ref) = tcx.impl_trait_ref(item.owner_id) {
-                let param_env = ty::ParamEnv::reveal_all();
-                let trait_ref = tcx.normalize_erasing_regions(param_env, trait_ref);
-                let overridden_methods = tcx.impl_item_implementor_ids(item.owner_id);
-                for method in tcx.provided_trait_methods(trait_ref.def_id) {
-                    if overridden_methods.contains_key(&method.def_id) {
-                        continue;
-                    }
+    let trait_ref = trait_ref.subst_identity();
 
-                    if tcx
-                        .generics_of(method.def_id)
-                        .own_requires_monomorphization()
-                    {
-                        continue;
-                    }
+    let param_env = ty::ParamEnv::reveal_all();
+    let trait_ref = tcx.normalize_erasing_regions(param_env, trait_ref);
+    let overridden_methods = tcx.impl_item_implementor_ids(item.owner_id);
 
-                    let substs =
-                        InternalSubsts::for_item(tcx, method.def_id, |param, _| match param.kind {
-                            GenericParamDefKind::Lifetime => tcx.lifetimes.re_erased.into(),
-                            GenericParamDefKind::Type { .. }
-                            | GenericParamDefKind::Const { .. } => {
-                                trait_ref.substs[param.index as usize]
-                            }
-                        });
-                    let instance = ty::Instance::resolve(tcx, param_env, method.def_id, substs)
-                        .unwrap()
-                        .unwrap();
-
-                    let mono_item = create_fn_mono_item(tcx, instance, DUMMY_SP);
-                    if mono_item.node.is_instantiable(tcx) {
-                        output.push(mono_item);
-                    }
-                }
-            }
+    for method in tcx.provided_trait_methods(trait_ref.def_id) {
+        if overridden_methods.contains_key(&method.def_id) {
+            continue;
         }
-        _ => bug!(),
+
+        if tcx
+            .generics_of(method.def_id)
+            .own_requires_monomorphization()
+        {
+            continue;
+        }
+
+        let substs = InternalSubsts::for_item(tcx, method.def_id, |param, _| match param.kind {
+            GenericParamDefKind::Lifetime => tcx.lifetimes.re_erased.into(),
+            GenericParamDefKind::Type { .. } | GenericParamDefKind::Const { .. } => {
+                trait_ref.substs[param.index as usize]
+            }
+        });
+        let instance = ty::Instance::expect_resolve(tcx, param_env, method.def_id, substs);
+
+        let mono_item = create_fn_mono_item(tcx, instance, DUMMY_SP);
+        if mono_item.node.is_instantiable(tcx) {
+            output.push(mono_item);
+        }
     }
 }
 

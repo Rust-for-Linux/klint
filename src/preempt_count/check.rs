@@ -126,7 +126,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 let source_ty = self.monomorphize(source_ty);
                 let (source_ty, target_ty) =
                     crate::monomorphize_collector::find_vtable_types_for_unsizing(
-                        self.cx.tcx,
+                        self.cx.tcx.at(span),
                         self.param_env,
                         source_ty,
                         target_ty,
@@ -540,7 +540,7 @@ memoize!(
                     let predicates = cx.predicates_of(entry).instantiate_own(cx.tcx, substs);
                     if rustc_trait_selection::traits::impossible_predicates(
                         cx.tcx,
-                        predicates.predicates,
+                        predicates.map(|(predicate, _)| predicate).collect(),
                     ) {
                         continue;
                     }

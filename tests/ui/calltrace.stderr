@@ -7,17 +7,6 @@ error: this call expects the preemption count to be 0
    |     ^^^^^^^^^^^^^
    |
    = note: but the possible preemption count at this point is 1..
-note: which may call this function with preemption count 1..
-  --> $DIR/calltrace.rs:15:5
-   |
-15 |     might_sleep();
-   |     ^^^^^^^^^^^^^
-note: which may call this function with preemption count 1..
-  --> $DIR/calltrace.rs:15:5
-   |
-15 |     might_sleep();
-   |     ^^^^^^^^^^^^^
-   = note: but the callee expects preemption count 0
 note: which is called from here
   --> $DIR/calltrace.rs:19:5
    |
