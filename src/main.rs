@@ -102,26 +102,9 @@ impl Callbacks for MyCallbacks {
     }
 }
 
-fn probe_sysroot() -> String {
-    std::process::Command::new("rustc")
-        .arg("+1.68.2")
-        .arg("--print")
-        .arg("sysroot")
-        .output()
-        .ok()
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|x| x.trim().to_owned())
-        .expect("failed to probe rust sysroot")
-}
-
 fn main() -> ExitCode {
     rustc_driver::init_env_logger("KLINT_LOG");
-    let mut args: Vec<_> = std::env::args().collect();
-
-    if !args.iter().any(|x| x == "--sysroot") {
-        args.push("--sysroot".to_owned());
-        args.push(probe_sysroot());
-    }
+    let args: Vec<_> = std::env::args().collect();
 
     match rustc_driver::RunCompiler::new(&args, &mut MyCallbacks).run() {
         Ok(_) => ExitCode::SUCCESS,
