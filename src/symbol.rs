@@ -21,6 +21,7 @@ def! {
     error,
     write,
     Write,
+    task,
     Waker,
     wake,
     wake_by_ref,

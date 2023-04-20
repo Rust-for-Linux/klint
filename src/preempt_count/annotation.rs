@@ -37,7 +37,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 let data = self.def_path(adt_def.did()).data &&
                 data.len() == 3 &&
                 let DefPathData::TypeNs(task) = data[0].data &&
-                task == sym::task &&
+                task == *crate::symbol::task &&
                 let DefPathData::TypeNs(wake) = data[1].data &&
                 wake == *crate::symbol::wake &&
                 let DefPathData::TypeNs(waker) = data[2].data &&

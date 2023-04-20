@@ -41,7 +41,7 @@ fn custom_coerce_unsize_info<'tcx>(
 
     let trait_ref = ty::Binder::dummy(ty::TraitRef {
         def_id,
-        substs: tcx.mk_substs_trait(source_ty, &[target_ty.into()]),
+        substs: tcx.mk_substs_trait(source_ty, [target_ty.into()]),
     });
 
     match tcx.codegen_select_candidate((param_env, trait_ref)) {
@@ -250,7 +250,7 @@ fn collect_items_rec<'tcx>(
             recursion_depth_reset = None;
 
             if let Ok(alloc) = tcx.eval_static_initializer(def_id) {
-                for &id in alloc.inner().provenance().values() {
+                for id in alloc.inner().provenance().provenances() {
                     collect_miri(tcx, id, &mut neighbors);
                 }
             }
@@ -599,7 +599,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
                     match self.tcx.const_eval_resolve(param_env, ct.expand(), None) {
                         // The `monomorphize` call should have evaluated that constant already.
                         Ok(val) => val,
-                        Err(ErrorHandled::Reported(_) | ErrorHandled::Linted) => return,
+                        Err(ErrorHandled::Reported(_)) => return,
                         Err(ErrorHandled::TooGeneric) => span_bug!(
                             self.body.source_info(location).span,
                             "collection encountered polymorphic constant: {:?}",
@@ -614,7 +614,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
                 match self.tcx.const_eval_resolve(param_env, uv, None) {
                     // The `monomorphize` call should have evaluated that constant already.
                     Ok(val) => val,
-                    Err(ErrorHandled::Reported(_) | ErrorHandled::Linted) => return,
+                    Err(ErrorHandled::Reported(_)) => return,
                     Err(ErrorHandled::TooGeneric) => span_bug!(
                         self.body.source_info(location).span,
                         "collection encountered polymorphic constant: {:?}",
@@ -1191,7 +1191,7 @@ fn collect_miri<'tcx>(
         }
         GlobalAlloc::Memory(alloc) => {
             trace!("collecting {:?} with {:#?}", alloc_id, alloc);
-            for &inner in alloc.inner().provenance().values() {
+            for inner in alloc.inner().provenance().provenances() {
                 rustc_data_structures::stack::ensure_sufficient_stack(|| {
                     collect_miri(tcx, inner, output);
                 });
@@ -1237,7 +1237,7 @@ fn collect_const_value<'tcx>(
             end: _,
         }
         | ConstValue::ByRef { alloc, .. } => {
-            for &id in alloc.inner().provenance().values() {
+            for id in alloc.inner().provenance().provenances() {
                 collect_miri(tcx, id, output);
             }
         }

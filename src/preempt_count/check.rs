@@ -194,7 +194,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 self.check_static(def_id)?;
             }
             GlobalAlloc::Memory(alloc) => {
-                for &inner in alloc.inner().provenance().values() {
+                for inner in alloc.inner().provenance().provenances() {
                     rustc_data_structures::stack::ensure_sufficient_stack(|| {
                         self.check_alloc(inner, span)
                     })?;
@@ -222,7 +222,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 end: _,
             }
             | ConstValue::ByRef { alloc, .. } => {
-                for &id in alloc.inner().provenance().values() {
+                for id in alloc.inner().provenance().provenances() {
                     self.check_alloc(id, span)?;
                 }
             }
@@ -323,7 +323,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
 
         let span = self.cx.def_span(def_id);
         if let Ok(alloc) = self.cx.eval_static_initializer(def_id) {
-            for &id in alloc.inner().provenance().values() {
+            for id in alloc.inner().provenance().provenances() {
                 self.check_alloc(id, span)?;
             }
         }
@@ -368,7 +368,7 @@ impl<'mir, 'tcx, 'cx> MirVisitor<'tcx> for MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 match self.cx.const_eval_resolve(param_env, uv, None) {
                     // The `monomorphize` call should have evaluated that constant already.
                     Ok(val) => val,
-                    Err(ErrorHandled::Reported(_) | ErrorHandled::Linted) => return,
+                    Err(ErrorHandled::Reported(_)) => return,
                     Err(ErrorHandled::TooGeneric) => {
                         self.result = Err(Error::TooGeneric);
                         return;

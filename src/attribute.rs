@@ -318,7 +318,7 @@ impl<'tcx> AttrParser<'tcx> {
         let mut expectation = None;
         let mut unchecked = false;
 
-        let ast::MacArgs::Delimited(delim_span, _, tts) = &item.args else {
+        let ast::AttrArgs::Delimited(ast::DelimArgs{dspan: delim_span, tokens: tts, ..}) = &item.args else {
             self.error(
                 attr.span,
                 |diag| {
