@@ -649,11 +649,11 @@ memoize!(
                 return p;
             }
 
-            warn!(
-                "Unable to compute adjustment of non-local function {:?}",
-                instance
-            );
-            return Ok(0);
+            // If we cannot load it, use annotation (e.g. libcore).
+            return Ok(cx
+                .preemption_count_annotation(instance.def_id())
+                .adjustment
+                .unwrap_or(0));
         }
 
         // Use annotation if available.

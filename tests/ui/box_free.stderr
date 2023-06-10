@@ -1,6 +1,4 @@
 WARN klint::ctxt no klint metadata found for crate core
-WARN klint::preempt_count::adjustment Unable to compute adjustment of non-local function Instance { def: Item(WithOptConstParam { did: DefId(2:7826 ~ core[1d43]::panicking::panic), const_param_did: None }), substs: [] }
-WARN klint::preempt_count::expectation Unable to compute property of non-local function Instance { def: Item(WithOptConstParam { did: DefId(2:7826 ~ core[1d43]::panicking::panic), const_param_did: None }), substs: [] }
 WARN klint::ctxt no klint metadata found for crate alloc
 error: freeing the box expects the preemption count to be 0
   --> $DIR/box_free.rs:27:57

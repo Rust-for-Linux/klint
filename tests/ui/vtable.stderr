@@ -10,8 +10,6 @@ warning: constructing this vtable may result in preemption count rule violation
 
 WARN klint::ctxt no klint metadata found for crate alloc
 WARN klint::ctxt no klint metadata found for crate core
-WARN klint::preempt_count::adjustment Unable to compute adjustment of non-local function Instance { def: Item(WithOptConstParam { did: DefId(5:128 ~ alloc[b346]::alloc::handle_alloc_error), const_param_did: None }), substs: [] }
-WARN klint::preempt_count::expectation Unable to compute property of non-local function Instance { def: Item(WithOptConstParam { did: DefId(5:128 ~ alloc[b346]::alloc::handle_alloc_error), const_param_did: None }), substs: [] }
 warning: constructing this vtable may result in preemption count rule violation
   --> $DIR/vtable.rs:50:32
    |

@@ -950,11 +950,11 @@ memoize!(
                 return p;
             }
 
-            warn!(
-                "Unable to compute property of non-local function {:?}",
-                instance
-            );
-            return Ok(ExpectationRange::top());
+            // If we cannot load it, use annotation (e.g. libcore).
+            return Ok(cx
+                .preemption_count_annotation(instance.def_id())
+                .expectation
+                .unwrap_or(ExpectationRange::top()));
         }
 
         // Use annotation if available.
