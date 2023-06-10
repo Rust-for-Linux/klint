@@ -33,7 +33,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 return Default::default();
             };
 
-            if let Some(adt_def) = self_ty.ty_adt_def() &&
+            if let Some(adt_def) = self_ty.skip_binder().ty_adt_def() &&
                 let data = self.def_path(adt_def.did()).data &&
                 data.len() == 3 &&
                 let DefPathData::TypeNs(task) = data[0].data &&

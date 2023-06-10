@@ -5,7 +5,7 @@
 // * `Spanned<MonoItem>` is returned in `AccessMap` instead of just `MonoItem`.
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
-use rustc_data_structures::sync::{par_for_each_in, MTLock, MTRef};
+use rustc_data_structures::sync::{par_for_each_in, MTLock, MTLockRef};
 use rustc_hir as hir;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, DefIdMap, LocalDefId};
@@ -20,7 +20,7 @@ use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::query::TyCtxtAt;
 use rustc_middle::ty::subst::{GenericArgKind, InternalSubsts};
 use rustc_middle::ty::{
-    self, GenericParamDefKind, Instance, Ty, TyCtxt, TypeFoldable, TypeVisitable, VtblEntry,
+    self, GenericParamDefKind, Instance, Ty, TyCtxt, TypeFoldable, TypeVisitableExt, VtblEntry,
 };
 use rustc_middle::{middle::codegen_fn_attrs::CodegenFnAttrFlags, mir::visit::TyContext};
 use rustc_session::config::EntryFnType;
@@ -114,8 +114,8 @@ pub fn collect_crate_mono_items(
     let recursion_limit = tcx.recursion_limit();
 
     {
-        let visited: MTRef<'_, _> = &mut visited;
-        let access_map: MTRef<'_, _> = &mut access_map;
+        let visited: MTLockRef<'_, _> = &mut visited;
+        let access_map: MTLockRef<'_, _> = &mut access_map;
 
         tcx.sess.time("monomorphization_collector_graph_walk", || {
             par_for_each_in(roots, |root| {
@@ -194,10 +194,10 @@ fn collect_roots(tcx: TyCtxt<'_>, mode: MonoItemCollectionMode) -> Vec<MonoItem<
 fn collect_items_rec<'tcx>(
     tcx: TyCtxt<'tcx>,
     starting_point: Spanned<MonoItem<'tcx>>,
-    visited: MTRef<'_, MTLock<FxHashSet<MonoItem<'tcx>>>>,
+    visited: MTLockRef<'_, FxHashSet<MonoItem<'tcx>>>,
     recursion_depths: &mut DefIdMap<usize>,
     recursion_limit: Limit,
-    access_map: MTRef<'_, MTLock<AccessMap<'tcx>>>,
+    access_map: MTLockRef<'_, AccessMap<'tcx>>,
 ) {
     if !visited.lock_mut().insert(starting_point.node) {
         // We've been here already, no need to search again.
@@ -481,7 +481,7 @@ struct MirNeighborCollector<'a, 'tcx> {
 impl<'a, 'tcx> MirNeighborCollector<'a, 'tcx> {
     pub fn monomorphize<T>(&self, value: T) -> T
     where
-        T: TypeFoldable<'tcx>,
+        T: TypeFoldable<TyCtxt<'tcx>>,
     {
         debug!("monomorphize: self.instance={:?}", self.instance);
         self.instance.subst_mir_and_normalize_erasing_regions(
@@ -628,8 +628,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
                 let callee_ty = self.monomorphize(callee_ty);
                 visit_fn_use(self.tcx, callee_ty, true, source, &mut self.output)
             }
-            mir::TerminatorKind::Drop { ref place, .. }
-            | mir::TerminatorKind::DropAndReplace { ref place, .. } => {
+            mir::TerminatorKind::Drop { ref place, .. } => {
                 let ty = place.ty(self.body, self.tcx).ty;
                 let ty = self.monomorphize(ty);
                 visit_drop_use(self.tcx, ty, true, source, self.output);
@@ -657,7 +656,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
                 let instance = Instance::mono(tcx, tcx.require_lang_item(lang_item, Some(source)));
                 self.output.push(create_fn_mono_item(tcx, instance, source));
             }
-            mir::TerminatorKind::Abort { .. } => {
+            mir::TerminatorKind::Terminate { .. } => {
                 let instance = Instance::mono(
                     tcx,
                     tcx.require_lang_item(LangItem::PanicCannotUnwind, Some(source)),
@@ -741,6 +740,9 @@ fn visit_instance_use<'tcx>(
                 bug!("{:?} being reified", instance);
             }
         }
+        ty::InstanceDef::ThreadLocalShim(..) => {
+            bug!("{:?} being reified", instance);
+        }
         ty::InstanceDef::DropGlue(_, None) => {
             // Don't need to emit noop drop glue if we are calling directly.
             if !is_direct_call {
@@ -753,7 +755,8 @@ fn visit_instance_use<'tcx>(
         | ty::InstanceDef::ClosureOnceShim { .. }
         | ty::InstanceDef::Item(..)
         | ty::InstanceDef::FnPtrShim(..)
-        | ty::InstanceDef::CloneShim(..) => {
+        | ty::InstanceDef::CloneShim(..)
+        | ty::InstanceDef::FnPtrAddrShim(..) => {
             output.push(create_fn_mono_item(tcx, instance, source));
         }
     }
@@ -886,7 +889,8 @@ pub fn find_vtable_types_for_unsizing<'tcx>(
             let target_fields = &target_adt_def.non_enum_variant().fields;
 
             assert!(
-                coerce_index < source_fields.len() && source_fields.len() == target_fields.len()
+                coerce_index.index() < source_fields.len()
+                    && source_fields.len() == target_fields.len()
             );
 
             find_vtable_types_for_unsizing(
@@ -1059,7 +1063,12 @@ impl<'v> RootCollector<'_, 'v> {
         };
 
         let start_def_id = self.tcx.require_lang_item(LangItem::Start, None);
-        let main_ret_ty = self.tcx.fn_sig(main_def_id).output();
+        let main_ret_ty = self
+            .tcx
+            .fn_sig(main_def_id)
+            .no_bound_vars()
+            .unwrap()
+            .output();
 
         // Given that `main()` has no arguments,
         // then its return type cannot have
@@ -1075,7 +1084,7 @@ impl<'v> RootCollector<'_, 'v> {
             self.tcx,
             ty::ParamEnv::reveal_all(),
             start_def_id,
-            self.tcx.intern_substs(&[main_ret_ty.into()]),
+            self.tcx.mk_substs(&[main_ret_ty.into()]),
         )
         .unwrap()
         .unwrap();

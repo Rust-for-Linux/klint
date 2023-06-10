@@ -1,7 +1,6 @@
 use rustc_errors::{EmissionGuarantee, MultiSpan};
 use rustc_hir::def_id::CrateNum;
 use rustc_hir::{Constness, LangItem};
-use rustc_index::bit_set::BitSet;
 use rustc_middle::mir::{self, Body, TerminatorKind};
 use rustc_middle::ty::{self, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, Ty};
 use rustc_mir_dataflow::lattice::MeetSemiLattice;
@@ -83,7 +82,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             instance,
         }
         .into_engine(self.tcx, body)
-        .dead_unwinds(&BitSet::new_filled(body.basic_blocks.len()))
         .iterate_to_fixpoint()
         .into_results_cursor(body);
 
@@ -391,7 +389,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
                 let elem_adj = self.drop_adjustment(param_and_elem_ty)?;
                 let size = size
-                    .try_eval_usize(self.tcx, param_env)
+                    .try_eval_target_usize(self.tcx, param_env)
                     .ok_or(Error::TooGeneric)?;
                 let Ok(size) = i32::try_from(size) else { return Ok(()); };
                 let Some(last_adj) = (size - 1).checked_mul(elem_adj) else { return Ok(()); };
@@ -425,7 +423,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         // Do not call `resolve_drop_in_place` because we need param_env.
         let drop_in_place = self.require_lang_item(LangItem::DropInPlace, None);
-        let substs = self.intern_substs(&[ty.into()]);
+        let substs = self.mk_substs(&[ty.into()]);
         let instance = ty::Instance::resolve(self.tcx, param_env, drop_in_place, substs)
             .unwrap()
             .unwrap();
@@ -464,7 +462,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             instance,
         }
         .into_engine(self.tcx, body)
-        .dead_unwinds(&BitSet::new_filled(body.basic_blocks.len()))
         .iterate_to_fixpoint()
         .into_results_cursor(body);
 
@@ -656,7 +653,8 @@ memoize!(
                 let poly_param_env = cx.param_env_reveal_all_normalized(def.did());
                 let poly_substs =
                     cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
-                let poly_poly_ty = poly_param_env.and(cx.tcx.mk_ty(ty::Adt(*def, poly_substs)));
+                let poly_poly_ty =
+                    poly_param_env.and(cx.tcx.mk_ty_from_kind(ty::Adt(*def, poly_substs)));
                 if poly_poly_ty != poly_ty {
                     match cx.drop_expectation(poly_poly_ty) {
                         Err(Error::TooGeneric) => (),
@@ -687,7 +685,7 @@ memoize!(
 
             ty::Array(elem_ty, size) => {
                 let size = size
-                    .try_eval_usize(cx.tcx, param_env)
+                    .try_eval_target_usize(cx.tcx, param_env)
                     .ok_or(Error::TooGeneric);
                 if size == Ok(0) {
                     return Ok(ExpectationRange::top());
@@ -741,7 +739,7 @@ memoize!(
 
         // Do not call `resolve_drop_in_place` because we need param_env.
         let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
-        let substs = cx.intern_substs(&[ty.into()]);
+        let substs = cx.mk_substs(&[ty.into()]);
         let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
             .unwrap()
             .unwrap();
@@ -836,7 +834,8 @@ memoize!(
                 let poly_param_env = cx.param_env_reveal_all_normalized(def.did());
                 let poly_substs =
                     cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
-                let poly_poly_ty = poly_param_env.and(cx.tcx.mk_ty(ty::Adt(*def, poly_substs)));
+                let poly_poly_ty =
+                    poly_param_env.and(cx.tcx.mk_ty_from_kind(ty::Adt(*def, poly_substs)));
                 if poly_poly_ty != poly_ty {
                     match cx.drop_expectation_check(poly_poly_ty) {
                         Err(Error::TooGeneric) => (),
@@ -864,7 +863,7 @@ memoize!(
 
         // Do not call `resolve_drop_in_place` because we need param_env.
         let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
-        let substs = cx.intern_substs(&[ty.into()]);
+        let substs = cx.mk_substs(&[ty.into()]);
         let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
             .unwrap()
             .unwrap();

@@ -8,7 +8,7 @@ use rustc_middle::mir::{self, visit::Visitor as MirVisitor, Body, Location};
 use rustc_middle::ty::adjustment::PointerCast;
 use rustc_middle::ty::{
     self, GenericParamDefKind, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, ToPredicate, Ty,
-    TypeFoldable, TypeVisitable,
+    TyCtxt, TypeFoldable, TypeVisitableExt,
 };
 
 struct MirNeighborVisitor<'mir, 'tcx, 'cx> {
@@ -20,7 +20,7 @@ struct MirNeighborVisitor<'mir, 'tcx, 'cx> {
 }
 
 impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
-    fn monomorphize<T: TypeFoldable<'tcx> + Clone>(&self, v: T) -> T {
+    fn monomorphize<T: TypeFoldable<TyCtxt<'tcx>> + Clone>(&self, v: T) -> T {
         self.instance
             .subst_mir_and_normalize_erasing_regions(self.cx.tcx, self.param_env, v)
     }
@@ -258,8 +258,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                     result?
                 }
             }
-            mir::TerminatorKind::Drop { ref place, .. }
-            | mir::TerminatorKind::DropAndReplace { ref place, .. } => {
+            mir::TerminatorKind::Drop { ref place, .. } => {
                 let ty = place.ty(self.body, self.cx.tcx).ty;
                 let ty = self.monomorphize(ty);
                 self.cx.call_stack.borrow_mut().push(UseSite {
@@ -298,7 +297,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 }
             }
             mir::TerminatorKind::Assert { .. }
-            | mir::TerminatorKind::Abort { .. }
+            | mir::TerminatorKind::Terminate { .. }
             | mir::TerminatorKind::Goto { .. }
             | mir::TerminatorKind::SwitchInt { .. }
             | mir::TerminatorKind::Resume
@@ -690,7 +689,8 @@ memoize!(
                 let poly_param_env = cx.param_env_reveal_all_normalized(def.did());
                 let poly_substs =
                     cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
-                let poly_poly_ty = poly_param_env.and(cx.tcx.mk_ty(ty::Adt(*def, poly_substs)));
+                let poly_poly_ty =
+                    poly_param_env.and(cx.tcx.mk_ty_from_kind(ty::Adt(*def, poly_substs)));
                 if poly_poly_ty != poly_ty {
                     match cx.drop_check(poly_poly_ty) {
                         Err(Error::TooGeneric) => (),
@@ -714,7 +714,7 @@ memoize!(
 
         // Do not call `resolve_drop_in_place` because we need param_env.
         let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
-        let substs = cx.intern_substs(&[ty.into()]);
+        let substs = cx.mk_substs(&[ty.into()]);
         let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
             .unwrap()
             .unwrap();

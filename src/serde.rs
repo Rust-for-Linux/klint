@@ -83,8 +83,6 @@ impl<'a, 'tcx> Encoder for EncodeContext<'tcx> {
         emit_i8(i8);
 
         emit_bool(bool);
-        emit_f64(f64);
-        emit_f32(f32);
         emit_char(char);
         emit_str(&str);
         emit_raw_bytes(&[u8]);
@@ -215,8 +213,6 @@ impl<'a, 'tcx> Decoder for DecodeContext<'a, 'tcx> {
         read_i8 -> i8;
 
         read_bool -> bool;
-        read_f64 -> f64;
-        read_f32 -> f32;
         read_char -> char;
         read_str -> &str;
     }

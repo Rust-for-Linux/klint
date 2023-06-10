@@ -8,7 +8,7 @@ use rustc_middle::mir::*;
 use rustc_middle::ty::{self, EarlyBinder, ParamEnv, Ty, TyCtxt};
 use rustc_mir_dataflow::elaborate_drops::{self, *};
 use rustc_span::Span;
-use rustc_target::abi::VariantIdx;
+use rustc_target::abi::{FieldIdx, VariantIdx};
 use std::{fmt, iter};
 
 use crate::ctxt::AnalysisCtxt;
@@ -39,8 +39,8 @@ pub fn build_drop_shim<'tcx>(
         return body;
     }
 
-    let substs = cx.intern_substs(&[ty.into()]);
-    let sig = cx.bound_fn_sig(def_id).subst(cx.tcx, substs);
+    let substs = cx.mk_substs(&[ty.into()]);
+    let sig = cx.fn_sig(def_id).subst(cx.tcx, substs);
     let sig = cx.erase_late_bound_regions(sig);
     let span = cx.def_span(def_id);
 
@@ -179,7 +179,7 @@ impl<'a, 'tcx> DropElaborator<'a, 'tcx> for DropShimElaborator<'a, 'tcx> {
 
     fn clear_drop_flag(&mut self, _location: Location, _path: Self::Path, _mode: DropFlagMode) {}
 
-    fn field_subpath(&self, _path: Self::Path, _field: Field) -> Option<Self::Path> {
+    fn field_subpath(&self, _path: Self::Path, _field: FieldIdx) -> Option<Self::Path> {
         None
     }
     fn deref_subpath(&self, _path: Self::Path) -> Option<Self::Path> {

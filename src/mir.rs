@@ -66,7 +66,7 @@ fn remap_mir_for_const_eval_select<'tcx>(
                 ref mut args,
                 destination,
                 target,
-                cleanup,
+                unwind,
                 fn_span,
                 ..
             } if let ty::FnDef(def_id, _) = *literal.ty().kind()
@@ -96,14 +96,14 @@ fn remap_mir_for_const_eval_select<'tcx>(
                 let arguments = (0..num_args).map(|x| {
                     let mut place_elems = place_elems.to_vec();
                     place_elems.push(ProjectionElem::Field(x.into(), fields[x]));
-                    let projection = tcx.intern_place_elems(&place_elems);
+                    let projection = tcx.mk_place_elems(&place_elems);
                     let place = Place {
                         local: place.local,
                         projection,
                     };
                     method(place)
                 }).collect();
-                terminator.kind = TerminatorKind::Call { func, args: arguments, destination, target, cleanup, from_hir_call: false, fn_span };
+                terminator.kind = TerminatorKind::Call { func, args: arguments, destination, target, unwind, from_hir_call: false, fn_span };
             }
             _ => {}
         }
@@ -181,7 +181,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             | ty::InstanceDef::Virtual(..)
             | ty::InstanceDef::ClosureOnceShim { .. }
             | ty::InstanceDef::DropGlue(..)
-            | ty::InstanceDef::CloneShim(..) => self.mir_shims(instance),
+            | ty::InstanceDef::CloneShim(..)
+            | ty::InstanceDef::ThreadLocalShim(..)
+            | ty::InstanceDef::FnPtrAddrShim(..) => self.mir_shims(instance),
         }
     }
 }

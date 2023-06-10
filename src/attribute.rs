@@ -36,11 +36,11 @@ pub enum KlintAttribute {
 
 struct Cursor<'a> {
     eof: TokenTree,
-    cursor: tokenstream::CursorRef<'a>,
+    cursor: tokenstream::RefTokenTreeCursor<'a>,
 }
 
 impl<'a> Cursor<'a> {
-    fn new(cursor: tokenstream::CursorRef<'a>, end_span: Span) -> Self {
+    fn new(cursor: tokenstream::RefTokenTreeCursor<'a>, end_span: Span) -> Self {
         let eof = TokenTree::Token(
             token::Token {
                 kind: token::TokenKind::Eof,

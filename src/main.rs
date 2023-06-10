@@ -1,5 +1,5 @@
 #![feature(rustc_private)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(min_specialization)]
 #![feature(box_patterns)]
 #![feature(if_let_guard)]
@@ -72,8 +72,8 @@ impl Callbacks for MyCallbacks {
 
                 // Skip `analysis_mir` call if this is a constructor, since it will be delegated back to
                 // `optimized_mir` for building ADT constructor shim.
-                if !tcx.is_constructor(def_id) {
-                    crate::mir::local_analysis_mir(tcx, def_id.expect_local());
+                if !tcx.is_constructor(def_id.to_def_id()) {
+                    crate::mir::local_analysis_mir(tcx, def_id);
                 }
 
                 let ptr = ORIGINAL_OPTIMIZED_MIR.load(Ordering::Relaxed);

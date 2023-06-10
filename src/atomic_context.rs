@@ -1,4 +1,4 @@
-use rustc_hir::Constness;
+use rustc_hir::{def_id::LocalDefId, Constness};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::ty::{Instance, InternalSubsts, ParamEnv, TyCtxt};
@@ -240,8 +240,8 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
 
         impl<'tcx, F, A> hir_visit::Visitor<'tcx> for FnAdtVisitor<'tcx, F, A>
         where
-            F: FnMut(HirId),
-            A: FnMut(HirId),
+            F: FnMut(LocalDefId),
+            A: FnMut(LocalDefId),
         {
             type NestedFilter = rustc_middle::hir::nested_filter::All;
 
@@ -255,11 +255,11 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
             fn visit_item(&mut self, i: &'tcx Item<'tcx>) {
                 match i.kind {
                     ItemKind::Struct(..) | ItemKind::Union(..) | ItemKind::Enum(..) => {
-                        (self.adt_callback)(i.hir_id());
+                        (self.adt_callback)(i.item_id().owner_id.def_id);
                     }
                     ItemKind::Trait(..) => {
                         // Not exactly an ADT, but we want to track drop_preempt_count on traits as well.
-                        (self.adt_callback)(i.hir_id());
+                        (self.adt_callback)(i.item_id().owner_id.def_id);
                     }
                     _ => (),
                 }
@@ -269,7 +269,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
             fn visit_foreign_item(&mut self, i: &'tcx ForeignItem<'tcx>) {
                 match i.kind {
                     ForeignItemKind::Fn(..) => {
-                        (self.fn_callback)(i.hir_id());
+                        (self.fn_callback)(i.owner_id.def_id);
                     }
                     _ => (),
                 }
@@ -279,7 +279,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
             fn visit_trait_item(&mut self, ti: &'tcx TraitItem<'tcx>) {
                 match ti.kind {
                     TraitItemKind::Fn(_, TraitFn::Required(_)) => {
-                        (self.fn_callback)(ti.hir_id());
+                        (self.fn_callback)(ti.owner_id.def_id);
                     }
                     _ => (),
                 }
@@ -292,7 +292,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
                 fd: &'tcx FnDecl<'tcx>,
                 b: BodyId,
                 _: Span,
-                id: HirId,
+                id: LocalDefId,
             ) {
                 (self.fn_callback)(id);
                 hir_visit::walk_fn(self, fk, fd, b, id)
@@ -304,20 +304,18 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
             .hir()
             .visit_all_item_likes_in_crate(&mut FnAdtVisitor {
                 tcx: self.cx.tcx,
-                fn_callback: |hir_id| {
-                    let def_id = self.cx.hir().local_def_id(hir_id).to_def_id();
-                    let annotation = self.cx.preemption_count_annotation(def_id);
+                fn_callback: |def_id: LocalDefId| {
+                    let annotation = self.cx.preemption_count_annotation(def_id.into());
                     self.cx
                         .sql_store::<crate::preempt_count::annotation::preemption_count_annotation>(
-                            def_id, annotation,
+                            def_id.into(), annotation,
                         );
                 },
-                adt_callback: |hir_id| {
-                    let def_id = self.cx.hir().local_def_id(hir_id).to_def_id();
-                    let annotation = self.cx.drop_preemption_count_annotation(def_id);
+                adt_callback: |def_id: LocalDefId| {
+                    let annotation = self.cx.drop_preemption_count_annotation(def_id.into());
                     self.cx
                         .sql_store::<crate::preempt_count::annotation::drop_preemption_count_annotation>(
-                            def_id, annotation,
+                            def_id.into(), annotation,
                         );
                 },
             });
@@ -328,21 +326,18 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         cx: &LateContext<'tcx>,
         _: rustc_hir::intravisit::FnKind<'tcx>,
         _: &'tcx rustc_hir::FnDecl<'tcx>,
-        body: &'tcx rustc_hir::Body<'tcx>,
+        _body: &'tcx rustc_hir::Body<'tcx>,
         _: rustc_span::Span,
-        _hir_id: rustc_hir::HirId,
+        def_id: LocalDefId,
     ) {
-        let def_id = cx.tcx.hir().body_owner_def_id(body.id());
-
         // Building MIR for `fn`s with unsatisfiable preds results in ICE.
         if crate::util::fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
             return;
         }
 
-        let identity = cx.tcx.erase_regions(InternalSubsts::identity_for_item(
-            self.cx.tcx,
-            def_id.into(),
-        ));
+        let identity = cx
+            .tcx
+            .erase_regions(InternalSubsts::identity_for_item(self.cx.tcx, def_id));
         let instance = Instance::new(def_id.into(), identity);
         let param_and_instance = self
             .cx
