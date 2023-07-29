@@ -3,8 +3,7 @@
 extern crate compiletest_rs as compiletest;
 
 use std::env;
-use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 static PROFILE_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
@@ -14,8 +13,9 @@ static PROFILE_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     profile_path.into()
 });
 
-fn run_ui_tests() -> std::thread::Result<()> {
+fn run_ui_tests(bless: bool) {
     let mut config = compiletest::Config {
+        bless,
         edition: Some("2021".into()),
         mode: compiletest::common::Mode::Ui,
         ..Default::default()
@@ -30,78 +30,11 @@ fn run_ui_tests() -> std::thread::Result<()> {
     config.rustc_path = PROFILE_PATH.join("klint");
     config.link_deps(); // Populate config.target_rustcflags with dependencies on the path
 
-    std::panic::catch_unwind(|| {
-        compiletest::run_tests(&config);
-    })
-}
-
-fn bless_ui_tests() {
-    let extensions = ["stdout", "stderr"].map(OsStr::new);
-    let build_dir = PROFILE_PATH.join("test/ui");
-
-    for file in std::fs::read_dir("tests/ui").unwrap() {
-        let file = file.unwrap();
-        if !file
-            .path()
-            .extension()
-            .map_or(false, |ext| extensions.contains(&ext))
-        {
-            continue;
-        }
-
-        let new_file_name = file
-            .path()
-            .with_extension(format!(
-                "stage-id.{}",
-                file.path().extension().unwrap().to_str().unwrap()
-            ))
-            .file_name()
-            .unwrap()
-            .to_owned();
-
-        if !build_dir.join(new_file_name).exists() {
-            println!("removing {}", file.path().display());
-            std::fs::remove_file(file.path()).expect("cannot remove reference file");
-        }
-    }
-
-    for file in std::fs::read_dir(&build_dir).unwrap() {
-        let file = file.unwrap();
-        if !file
-            .path()
-            .extension()
-            .map_or(false, |ext| extensions.contains(&ext))
-        {
-            continue;
-        }
-
-        let old_file_name = file.file_name().to_str().unwrap().replace(".stage-id", "");
-        let old_file_path = Path::new("tests/ui").join(old_file_name);
-
-        let new_file = std::fs::read(file.path()).unwrap();
-        let old_file = std::fs::read(&old_file_path).unwrap_or_default();
-
-        if new_file != old_file {
-            println!(
-                "updating {} with {}",
-                old_file_path.display(),
-                file.path().display()
-            );
-            std::fs::copy(file.path(), old_file_path).expect("cannot update reference file");
-        }
-    }
+    compiletest::run_tests(&config);
 }
 
 #[test]
 fn compile_test() {
-    match run_ui_tests() {
-        Ok(_) => (),
-        Err(payload) => {
-            let bless = env::var("BLESS").map_or(false, |x| !x.trim().is_empty());
-            if bless {
-                bless_ui_tests();
-            }
-            std::panic::resume_unwind(payload);
-        }
-    }
+    let bless = env::var("BLESS").map_or(false, |x| !x.trim().is_empty());
+    run_ui_tests(bless);
 }
