@@ -12,11 +12,11 @@ cd klint
 cargo install --path .
 ```
 
-Note that klint currently is based on Rust 1.66 so it is likely that running `cargo install --git` will not work as it will not use the `rust-toolchain` file in the repository.
+Note that klint currently is based on Rust 1.68 so it is likely that running `cargo install --git` will not work as it will not use the `rust-toolchain` file in the repository.
 
 To run this tool, use rustup which will prepare the necessary environment variables:
 ```
-rustup run 1.66.0 klint
+rustup run 1.68.0 klint
 ```
 
 `klint` will behave like rustc, just with additional lints.
