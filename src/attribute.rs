@@ -84,7 +84,10 @@ impl<'tcx> AttrParser<'tcx> {
             "incorrect usage of `#[kint::preempt_count]`",
             decorate,
         );
-        Err(ErrorGuaranteed::unchecked_claim_error_was_emitted())
+        Err(self
+            .tcx
+            .sess
+            .delay_span_bug(span, "incorrect usage of `#[kint::preempt_count]`"))
     }
 
     fn parse_comma_delimited(

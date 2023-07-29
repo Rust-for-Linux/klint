@@ -21,8 +21,11 @@ struct MirNeighborVisitor<'mir, 'tcx, 'cx> {
 
 impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
     fn monomorphize<T: TypeFoldable<TyCtxt<'tcx>> + Clone>(&self, v: T) -> T {
-        self.instance
-            .subst_mir_and_normalize_erasing_regions(self.cx.tcx, self.param_env, v)
+        self.instance.subst_mir_and_normalize_erasing_regions(
+            self.cx.tcx,
+            self.param_env,
+            ty::EarlyBinder(v),
+        )
     }
 
     fn check_vtable_unsizing(

@@ -243,7 +243,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                 let callee_ty = self.instance.subst_mir_and_normalize_erasing_regions(
                     self.checker.tcx,
                     self.param_env,
-                    callee_ty,
+                    ty::EarlyBinder(callee_ty),
                 );
                 if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
                     if let Some(v) = self.checker.preemption_count_annotation(def_id).adjustment {
@@ -282,7 +282,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                 let ty = self.instance.subst_mir_and_normalize_erasing_regions(
                     self.checker.tcx,
                     self.param_env,
-                    ty,
+                    ty::EarlyBinder(ty),
                 );
 
                 self.checker.call_stack.borrow_mut().push(UseSite {

@@ -2,12 +2,115 @@ use rustc_data_structures::fx::{FxHashMap, FxIndexSet};
 use rustc_data_structures::sync::Lrc;
 use rustc_middle::mir::interpret::{self, AllocDecodingState, AllocId};
 use rustc_middle::ty::{self, Ty, TyCtxt, TyDecoder, TyEncoder};
-use rustc_serialize::opaque::{MemDecoder, MemEncoder};
+use rustc_serialize::opaque::MemDecoder;
 use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_session::StableCrateId;
 use rustc_span::def_id::{CrateNum, DefIndex};
 use rustc_span::source_map::StableSourceFileId;
 use rustc_span::{BytePos, SourceFile, Span, SyntaxContext, DUMMY_SP};
+use std::mem::MaybeUninit;
+
+// This is the last available version of `MemEncoder` in rustc_serialize::opaque before its removal.
+pub struct MemEncoder {
+    pub data: Vec<u8>,
+}
+
+impl MemEncoder {
+    pub fn new() -> MemEncoder {
+        MemEncoder { data: vec![] }
+    }
+
+    #[inline]
+    pub fn position(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn finish(self) -> Vec<u8> {
+        self.data
+    }
+}
+
+macro_rules! write_leb128 {
+    ($enc:expr, $value:expr, $int_ty:ty, $fun:ident) => {{
+        const MAX_ENCODED_LEN: usize = rustc_serialize::leb128::max_leb128_len::<$int_ty>();
+        let old_len = $enc.data.len();
+
+        if MAX_ENCODED_LEN > $enc.data.capacity() - old_len {
+            $enc.data.reserve(MAX_ENCODED_LEN);
+        }
+
+        // SAFETY: The above check and `reserve` ensures that there is enough
+        // room to write the encoded value to the vector's internal buffer.
+        unsafe {
+            let buf = &mut *($enc.data.as_mut_ptr().add(old_len)
+                as *mut [MaybeUninit<u8>; MAX_ENCODED_LEN]);
+            let encoded = rustc_serialize::leb128::$fun(buf, $value);
+            $enc.data.set_len(old_len + encoded.len());
+        }
+    }};
+}
+
+impl Encoder for MemEncoder {
+    #[inline]
+    fn emit_usize(&mut self, v: usize) {
+        write_leb128!(self, v, usize, write_usize_leb128)
+    }
+
+    #[inline]
+    fn emit_u128(&mut self, v: u128) {
+        write_leb128!(self, v, u128, write_u128_leb128);
+    }
+
+    #[inline]
+    fn emit_u64(&mut self, v: u64) {
+        write_leb128!(self, v, u64, write_u64_leb128);
+    }
+
+    #[inline]
+    fn emit_u32(&mut self, v: u32) {
+        write_leb128!(self, v, u32, write_u32_leb128);
+    }
+
+    #[inline]
+    fn emit_u16(&mut self, v: u16) {
+        self.data.extend_from_slice(&v.to_le_bytes());
+    }
+
+    #[inline]
+    fn emit_u8(&mut self, v: u8) {
+        self.data.push(v);
+    }
+
+    #[inline]
+    fn emit_isize(&mut self, v: isize) {
+        write_leb128!(self, v, isize, write_isize_leb128)
+    }
+
+    #[inline]
+    fn emit_i128(&mut self, v: i128) {
+        write_leb128!(self, v, i128, write_i128_leb128)
+    }
+
+    #[inline]
+    fn emit_i64(&mut self, v: i64) {
+        write_leb128!(self, v, i64, write_i64_leb128)
+    }
+
+    #[inline]
+    fn emit_i32(&mut self, v: i32) {
+        write_leb128!(self, v, i32, write_i32_leb128)
+    }
+
+    #[inline]
+    fn emit_i16(&mut self, v: i16) {
+        self.data.extend_from_slice(&v.to_le_bytes());
+    }
+
+    #[inline]
+    fn emit_raw_bytes(&mut self, s: &[u8]) {
+        self.data.extend_from_slice(s);
+    }
+}
 
 pub struct EncodeContext<'tcx> {
     encoder: MemEncoder,
@@ -220,6 +323,14 @@ impl<'a, 'tcx> Decoder for DecodeContext<'a, 'tcx> {
     fn read_raw_bytes(&mut self, len: usize) -> &[u8] {
         self.decoder.read_raw_bytes(len)
     }
+
+    fn peek_byte(&self) -> u8 {
+        self.decoder.peek_byte()
+    }
+
+    fn position(&self) -> usize {
+        self.decoder.position()
+    }
 }
 
 impl<'a, 'tcx> TyDecoder for DecodeContext<'a, 'tcx> {
@@ -230,16 +341,6 @@ impl<'a, 'tcx> TyDecoder for DecodeContext<'a, 'tcx> {
     #[inline]
     fn interner(&self) -> Self::I {
         self.tcx
-    }
-
-    #[inline]
-    fn peek_byte(&self) -> u8 {
-        self.decoder.data[self.decoder.position()]
-    }
-
-    #[inline]
-    fn position(&self) -> usize {
-        self.decoder.position()
     }
 
     fn cached_ty_for_shorthand<F>(&mut self, shorthand: usize, or_insert_with: F) -> Ty<'tcx>
@@ -259,7 +360,7 @@ impl<'a, 'tcx> TyDecoder for DecodeContext<'a, 'tcx> {
     where
         F: FnOnce(&mut Self) -> R,
     {
-        let new_opaque = MemDecoder::new(self.decoder.data, pos);
+        let new_opaque = MemDecoder::new(self.decoder.data(), pos);
         let old_opaque = std::mem::replace(&mut self.decoder, new_opaque);
         let r = f(self);
         self.decoder = old_opaque;

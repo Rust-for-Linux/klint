@@ -150,7 +150,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let mut first_problematic_block = return_bb;
         let dominators = body.basic_blocks.dominators();
         loop {
-            let b = dominators.immediate_dominator(first_problematic_block);
+            let b = dominators
+                .immediate_dominator(first_problematic_block)
+                .expect("block not reachable!");
             if b == first_problematic_block {
                 // Shouldn't actually happen because the entry block should always have a single value.
                 break;

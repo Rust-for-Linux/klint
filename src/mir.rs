@@ -38,7 +38,7 @@ pub fn local_analysis_mir<'tcx>(tcx: TyCtxt<'tcx>, did: LocalDefId) -> &'tcx Bod
     }
 
     let body = tcx
-        .mir_drops_elaborated_and_const_checked(ty::WithOptConstParam::unknown(did))
+        .mir_drops_elaborated_and_const_checked(did)
         .borrow()
         .clone();
     let body = remap_mir_for_const_eval_select(tcx, body, hir::Constness::NotConst);
@@ -159,19 +159,16 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
     pub fn analysis_instance_mir(&self, instance: ty::InstanceDef<'tcx>) -> &'tcx Body<'tcx> {
         match instance {
-            ty::InstanceDef::Item(def) => {
-                let def_kind = self.def_kind(def.did);
+            ty::InstanceDef::Item(did) => {
+                let def_kind = self.def_kind(did);
                 match def_kind {
                     DefKind::Const
                     | DefKind::Static(..)
                     | DefKind::AssocConst
                     | DefKind::Ctor(..)
                     | DefKind::AnonConst
-                    | DefKind::InlineConst => self.mir_for_ctfe_opt_const_arg(def),
-                    _ => {
-                        assert_eq!(def.const_param_did, None);
-                        self.analysis_mir(def.did)
-                    }
+                    | DefKind::InlineConst => self.mir_for_ctfe(did),
+                    _ => self.analysis_mir(did),
                 }
             }
             ty::InstanceDef::VTableShim(..)

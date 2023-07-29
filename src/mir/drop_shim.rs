@@ -2,7 +2,7 @@
 // Adopted to support polymorphic drop shims
 
 use rustc_hir::def_id::DefId;
-use rustc_index::vec::{Idx, IndexVec};
+use rustc_index::{Idx, IndexVec};
 use rustc_middle::mir::patch::MirPatch;
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, EarlyBinder, ParamEnv, Ty, TyCtxt};

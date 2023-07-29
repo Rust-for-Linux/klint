@@ -1,5 +1,5 @@
 // This module is from rustc_monomorphize/collector.rs, modified so that
-// * All neighbors are collected, including those that should not be codegen-ed locally.
+// * All uses are collected, including those that should not be codegen-ed locally.
 // * `inlines` field is removed from `InliningMap`.
 // * Due to the above reasons, `InliningMap` is renamed to `AccessMap`.
 // * `Spanned<MonoItem>` is returned in `AccessMap` instead of just `MonoItem`.
@@ -15,9 +15,9 @@ use rustc_middle::mir::interpret::{ErrorHandled, GlobalAlloc, Scalar};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::mir::visit::Visitor as MirVisitor;
 use rustc_middle::mir::{self, Local, Location};
+use rustc_middle::query::TyCtxtAt;
 use rustc_middle::ty::adjustment::{CustomCoerceUnsized, PointerCast};
 use rustc_middle::ty::print::with_no_trimmed_paths;
-use rustc_middle::ty::query::TyCtxtAt;
 use rustc_middle::ty::subst::{GenericArgKind, InternalSubsts};
 use rustc_middle::ty::{
     self, GenericParamDefKind, Instance, Ty, TyCtxt, TypeFoldable, TypeVisitableExt, VtblEntry,
@@ -37,8 +37,12 @@ fn custom_coerce_unsize_info<'tcx>(
     source_ty: Ty<'tcx>,
     target_ty: Ty<'tcx>,
 ) -> CustomCoerceUnsized {
-    let trait_ref =
-        ty::Binder::dummy(tcx.mk_trait_ref(LangItem::CoerceUnsized, [source_ty, target_ty]));
+    let trait_ref = ty::Binder::dummy(ty::TraitRef::from_lang_item(
+        tcx.tcx,
+        LangItem::CoerceUnsized,
+        tcx.span,
+        [source_ty, target_ty],
+    ));
 
     match tcx.codegen_select_candidate((param_env, trait_ref)) {
         Ok(traits::ImplSource::UserDefined(traits::ImplSourceUserDefinedData {
@@ -59,7 +63,7 @@ pub enum MonoItemCollectionMode {
 
 /// Maps every mono item to all mono items it references in its
 /// body.
-pub struct AccessMap<'tcx> {
+pub struct UsageMap<'tcx> {
     // Maps a source mono item to the range of mono items
     // accessed by it.
     // The range selects elements within the `targets` vecs.
@@ -67,9 +71,9 @@ pub struct AccessMap<'tcx> {
     targets: Vec<Spanned<MonoItem<'tcx>>>,
 }
 
-impl<'tcx> AccessMap<'tcx> {
-    fn new() -> AccessMap<'tcx> {
-        AccessMap {
+impl<'tcx> UsageMap<'tcx> {
+    fn new() -> UsageMap<'tcx> {
+        UsageMap {
             index: FxHashMap::default(),
             targets: Vec::new(),
         }
@@ -98,7 +102,7 @@ impl<'tcx> AccessMap<'tcx> {
 pub fn collect_crate_mono_items(
     tcx: TyCtxt<'_>,
     mode: MonoItemCollectionMode,
-) -> (FxHashSet<MonoItem<'_>>, AccessMap<'_>) {
+) -> (FxHashSet<MonoItem<'_>>, UsageMap<'_>) {
     let _prof_timer = tcx.prof.generic_activity("monomorphization_collector");
 
     let roots = tcx
@@ -110,7 +114,7 @@ pub fn collect_crate_mono_items(
     debug!("building mono item graph, beginning at roots");
 
     let mut visited = MTLock::new(FxHashSet::default());
-    let mut access_map = MTLock::new(AccessMap::new());
+    let mut access_map = MTLock::new(UsageMap::new());
     let recursion_limit = tcx.recursion_limit();
 
     {
@@ -193,13 +197,13 @@ fn collect_roots(tcx: TyCtxt<'_>, mode: MonoItemCollectionMode) -> Vec<MonoItem<
 /// post-monorphization error is encountered during a collection step.
 fn collect_items_rec<'tcx>(
     tcx: TyCtxt<'tcx>,
-    starting_point: Spanned<MonoItem<'tcx>>,
+    starting_item: Spanned<MonoItem<'tcx>>,
     visited: MTLockRef<'_, FxHashSet<MonoItem<'tcx>>>,
     recursion_depths: &mut DefIdMap<usize>,
     recursion_limit: Limit,
-    access_map: MTLockRef<'_, AccessMap<'tcx>>,
+    access_map: MTLockRef<'_, UsageMap<'tcx>>,
 ) {
-    if !visited.lock_mut().insert(starting_point.node) {
+    if !visited.lock_mut().insert(starting_item.node) {
         // We've been here already, no need to search again.
         return;
     }
@@ -233,7 +237,7 @@ fn collect_items_rec<'tcx>(
     // FIXME: don't rely on global state, instead bubble up errors. Note: this is very hard to do.
     let error_count = tcx.sess.diagnostic().err_count();
 
-    match starting_point.node {
+    match starting_item.node {
         MonoItem::Static(def_id) => {
             let instance = Instance::mono(tcx, def_id);
 
@@ -241,7 +245,7 @@ fn collect_items_rec<'tcx>(
             debug_assert!(should_codegen_locally(tcx, &instance));
 
             let ty = instance.ty(tcx, ty::ParamEnv::reveal_all());
-            visit_drop_use(tcx, ty, true, starting_point.span, &mut neighbors);
+            visit_drop_use(tcx, ty, true, starting_item.span, &mut neighbors);
 
             recursion_depth_reset = None;
 
@@ -259,7 +263,7 @@ fn collect_items_rec<'tcx>(
             recursion_depth_reset = Some(check_recursion_limit(
                 tcx,
                 instance,
-                starting_point.span,
+                starting_item.span,
                 recursion_depths,
                 recursion_limit,
             ));
@@ -311,13 +315,13 @@ fn collect_items_rec<'tcx>(
     // Check for PMEs and emit a diagnostic if one happened. To try to show relevant edges of the
     // mono item graph.
     if tcx.sess.diagnostic().err_count() > error_count
-        && starting_point.node.is_generic_fn()
-        && starting_point.node.is_user_defined()
+        && starting_item.node.is_generic_fn()
+        && starting_item.node.is_user_defined()
     {
-        let formatted_item = with_no_trimmed_paths!(starting_point.node.to_string());
+        let formatted_item = with_no_trimmed_paths!(starting_item.node.to_string());
         tcx.sess.span_note_without_error(
-            starting_point.span,
-            &format!(
+            starting_item.span,
+            format!(
                 "the above error was encountered while instantiating `{}`",
                 formatted_item
             ),
@@ -326,7 +330,7 @@ fn collect_items_rec<'tcx>(
 
     access_map
         .lock_mut()
-        .record_accesses(starting_point.node, &neighbors);
+        .record_accesses(starting_item.node, &neighbors);
 
     for neighbour in neighbors {
         let should_gen = match neighbour.node {
@@ -414,10 +418,10 @@ fn check_recursion_limit<'tcx>(
             "reached the recursion limit while instantiating `{}`",
             shrunk
         );
-        let mut err = tcx.sess.struct_span_fatal(span, &error);
-        err.span_note(def_span, &format!("`{}` defined here", def_path_str));
+        let mut err = tcx.sess.struct_span_fatal(span, error);
+        err.span_note(def_span, format!("`{}` defined here", def_path_str));
         if let Some(path) = written_to_path {
-            err.note(&format!(
+            err.note(format!(
                 "the full type name has been written to '{}'",
                 path.display()
             ));
@@ -456,14 +460,14 @@ fn check_type_length_limit<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) {
         );
         let mut diag = tcx
             .sess
-            .struct_span_fatal(tcx.def_span(instance.def_id()), &msg);
+            .struct_span_fatal(tcx.def_span(instance.def_id()), msg);
         if let Some(path) = written_to_path {
-            diag.note(&format!(
+            diag.note(format!(
                 "the full type name has been written to '{}'",
                 path.display()
             ));
         }
-        diag.help(&format!(
+        diag.help(format!(
             "consider adding a `#![type_length_limit=\"{}\"]` attribute to your crate",
             type_length
         ));
@@ -487,7 +491,7 @@ impl<'a, 'tcx> MirNeighborCollector<'a, 'tcx> {
         self.instance.subst_mir_and_normalize_erasing_regions(
             self.tcx,
             ty::ParamEnv::reveal_all(),
-            value,
+            ty::EarlyBinder(value),
         )
     }
 }
@@ -649,7 +653,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
                 }
             }
             mir::TerminatorKind::Assert { ref msg, .. } => {
-                let lang_item = match msg {
+                let lang_item = match &**msg {
                     mir::AssertKind::BoundsCheck { .. } => LangItem::PanicBoundsCheck,
                     _ => LangItem::Panic,
                 };

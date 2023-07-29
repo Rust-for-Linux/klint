@@ -195,7 +195,7 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
 
                                 diag.span_note(
                                     spanned_caller.span,
-                                    &format!(
+                                    format!(
                                         "which is called from `{}`",
                                         cx.tcx.def_path_str_with_substs(
                                             caller.def_id(),
@@ -228,7 +228,7 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
 
                                 diag.span_note(
                                     callee_callee.span,
-                                    &format!(
+                                    format!(
                                         "{} calls into `{}`",
                                         msg,
                                         cx.tcx.def_path_str_with_substs(
@@ -240,7 +240,7 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
                                 msg = "which";
                             }
 
-                            diag.note(&format!("{} may call alloc_error_handler", msg));
+                            diag.note(format!("{} may call alloc_error_handler", msg));
                             diag
                         },
                     );
