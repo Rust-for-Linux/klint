@@ -5,7 +5,7 @@ use rustc_hir::{Constness, LangItem};
 use rustc_infer::traits::util::PredicateSet;
 use rustc_middle::mir::interpret::{AllocId, ConstValue, ErrorHandled, GlobalAlloc, Scalar};
 use rustc_middle::mir::{self, visit::Visitor as MirVisitor, Body, Location};
-use rustc_middle::ty::adjustment::PointerCast;
+use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::{
     self, GenericParamDefKind, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, ToPredicate, Ty,
     TyCtxt, TypeFoldable, TypeVisitableExt,
@@ -24,7 +24,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
         self.instance.subst_mir_and_normalize_erasing_regions(
             self.cx.tcx,
             self.param_env,
-            ty::EarlyBinder(v),
+            ty::EarlyBinder::bind(v),
         )
     }
 
@@ -105,7 +105,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
     fn check_fn_pointer_cast(&mut self, instance: Instance<'tcx>, span: Span) -> Result<(), Error> {
         self.cx.call_stack.borrow_mut().push(UseSite {
             instance: self.param_env.and(self.instance),
-            kind: UseSiteKind::PointerCast(span),
+            kind: UseSiteKind::PointerCoercion(span),
         });
         let result = self
             .cx
@@ -123,7 +123,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
 
         match *rvalue {
             mir::Rvalue::Cast(
-                mir::CastKind::Pointer(PointerCast::Unsize),
+                mir::CastKind::PointerCoercion(PointerCoercion::Unsize),
                 ref operand,
                 target_ty,
             )
@@ -149,7 +149,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 }
             }
             mir::Rvalue::Cast(
-                mir::CastKind::Pointer(PointerCast::ReifyFnPointer),
+                mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer),
                 ref operand,
                 _,
             ) => {
@@ -164,7 +164,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 }
             }
             mir::Rvalue::Cast(
-                mir::CastKind::Pointer(PointerCast::ClosureFnPointer(_)),
+                mir::CastKind::PointerCoercion(PointerCoercion::ClosureFnPointer(_)),
                 ref operand,
                 _,
             ) => {
@@ -521,8 +521,7 @@ memoize!(
                     .predicates
                     .into_iter()
                     .filter_map(|(pred, _)| {
-                        pred.subst_supertrait(cx.tcx, &trait_ref)
-                            .to_opt_poly_trait_pred()
+                        pred.subst_supertrait(cx.tcx, &trait_ref).as_trait_clause()
                     });
                 for supertrait in super_traits {
                     if visited.insert(supertrait.to_predicate(cx.tcx)) {
@@ -685,8 +684,13 @@ memoize!(
 
             ty::Adt(def, substs) if def.is_box() => {
                 cx.drop_check(param_env.and(substs.type_at(0)))?;
-                let box_free = cx.require_lang_item(LangItem::BoxFree, None);
-                cx.instance_check(param_env.and(Instance::new(box_free, substs)))?;
+                let drop_trait = cx.require_lang_item(LangItem::Drop, None);
+                let drop_fn = cx.associated_item_def_ids(drop_trait)[0];
+                let box_free =
+                    ty::Instance::resolve(cx.tcx, param_env, drop_fn, cx.mk_substs(&[ty.into()]))
+                        .unwrap()
+                        .unwrap();
+                cx.instance_check(param_env.and(box_free))?;
                 return Ok(());
             }
 

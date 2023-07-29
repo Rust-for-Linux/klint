@@ -6,6 +6,7 @@ use std::sync::{LazyLock, Mutex};
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::{self as hir, def::DefKind};
+use rustc_middle::mir::CallSource;
 use rustc_middle::mir::{
     Body, Constant, LocalDecl, Operand, Place, ProjectionElem, Rvalue, SourceInfo, Statement,
     StatementKind, TerminatorKind,
@@ -103,7 +104,7 @@ fn remap_mir_for_const_eval_select<'tcx>(
                     };
                     method(place)
                 }).collect();
-                terminator.kind = TerminatorKind::Call { func, args: arguments, destination, target, unwind, from_hir_call: false, fn_span };
+                terminator.kind = TerminatorKind::Call { func, args: arguments, destination, target, unwind,  call_source: CallSource::Misc, fn_span };
             }
             _ => {}
         }

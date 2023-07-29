@@ -75,7 +75,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         limit -= 1;
                     }
                 }
-                UseSiteKind::PointerCast(span) => {
+                UseSiteKind::PointerCoercion(span) => {
                     if diag.span.is_dummy() {
                         diag.set_span(*span);
                     } else {
@@ -369,10 +369,16 @@ memoize!(
 
             ty::Adt(def, substs) if def.is_box() => {
                 let adj = cx.drop_adjustment(param_env.and(substs.type_at(0)))?;
-                let box_free = cx.require_lang_item(LangItem::BoxFree, None);
-                let box_free_adj =
-                    cx.instance_adjustment(param_env.and(Instance::new(box_free, substs)))?;
-                let Some(adj) = adj.checked_add(box_free_adj) else { cx.drop_adjustment_overflow(poly_ty)? };
+                let drop_trait = cx.require_lang_item(LangItem::Drop, None);
+                let drop_fn = cx.associated_item_def_ids(drop_trait)[0];
+                let box_free =
+                    ty::Instance::resolve(cx.tcx, param_env, drop_fn, cx.mk_substs(&[ty.into()]))
+                        .unwrap()
+                        .unwrap();
+                let box_free_adj = cx.instance_adjustment(param_env.and(box_free))?;
+                let Some(adj) = adj.checked_add(box_free_adj) else {
+                    cx.drop_adjustment_overflow(poly_ty)?
+                };
                 return Ok(adj);
             }
 

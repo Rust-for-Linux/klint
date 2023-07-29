@@ -25,7 +25,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 let callee_ty = instance.subst_mir_and_normalize_erasing_regions(
                     self.tcx,
                     param_env,
-                    ty::EarlyBinder(callee_ty),
+                    ty::EarlyBinder::bind(callee_ty),
                 );
                 if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
                     if let Some(v) = self.preemption_count_annotation(def_id).expectation {
@@ -54,7 +54,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 let ty = instance.subst_mir_and_normalize_erasing_regions(
                     self.tcx,
                     param_env,
-                    ty::EarlyBinder(ty),
+                    ty::EarlyBinder::bind(ty),
                 );
 
                 self.call_stack.borrow_mut().push(UseSite {
@@ -123,7 +123,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let callee_ty = instance.subst_mir_and_normalize_erasing_regions(
                         self.tcx,
                         param_env,
-                        ty::EarlyBinder(callee_ty),
+                        ty::EarlyBinder::bind(callee_ty),
                     );
                     if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
                         if let Some(v) = self.preemption_count_annotation(def_id).expectation {
@@ -193,7 +193,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let ty = instance.subst_mir_and_normalize_erasing_regions(
                         self.tcx,
                         param_env,
-                        ty::EarlyBinder(ty),
+                        ty::EarlyBinder::bind(ty),
                     );
 
                     self.call_stack.borrow_mut().push(UseSite {
@@ -354,11 +354,19 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 }
                 let adj = self.drop_adjustment(param_env.and(substs.type_at(0)))?;
 
-                let box_free = self.require_lang_item(LangItem::BoxFree, None);
-                let box_free_inst = Instance::new(box_free, substs);
+                let drop_trait = self.require_lang_item(LangItem::Drop, None);
+                let drop_fn = self.associated_item_def_ids(drop_trait)[0];
+                let box_free = ty::Instance::resolve(
+                    self.tcx,
+                    param_env,
+                    drop_fn,
+                    self.mk_substs(&[ty.into()]),
+                )
+                .unwrap()
+                .unwrap();
                 return self.report_instance_expectation_error(
                     param_env,
-                    box_free_inst,
+                    box_free,
                     expected + AdjustmentBounds::single_value(adj),
                     span,
                     diag,
@@ -494,7 +502,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let callee_ty = instance.subst_mir_and_normalize_erasing_regions(
                         self.tcx,
                         param_env,
-                        ty::EarlyBinder(callee_ty),
+                        ty::EarlyBinder::bind(callee_ty),
                     );
                     if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
                         if let Some(v) = self.preemption_count_annotation(def_id).expectation {
@@ -523,7 +531,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let ty = instance.subst_mir_and_normalize_erasing_regions(
                         self.tcx,
                         param_env,
-                        ty::EarlyBinder(ty),
+                        ty::EarlyBinder::bind(ty),
                     );
 
                     self.call_stack.borrow_mut().push(UseSite {
@@ -640,9 +648,13 @@ memoize!(
 
             ty::Adt(def, substs) if def.is_box() => {
                 let exp = cx.drop_expectation(param_env.and(substs.type_at(0)))?;
-                let box_free = cx.require_lang_item(LangItem::BoxFree, None);
-                let box_free_exp =
-                    cx.instance_expectation(param_env.and(Instance::new(box_free, substs)))?;
+                let drop_trait = cx.require_lang_item(LangItem::Drop, None);
+                let drop_fn = cx.associated_item_def_ids(drop_trait)[0];
+                let box_free =
+                    ty::Instance::resolve(cx.tcx, param_env, drop_fn, cx.mk_substs(&[ty.into()]))
+                        .unwrap()
+                        .unwrap();
+                let box_free_exp = cx.instance_expectation(param_env.and(box_free))?;
 
                 // Usuaully freeing the box shouldn't have any instance expectations, so short circuit here.
                 if box_free_exp == ExpectationRange::top() {

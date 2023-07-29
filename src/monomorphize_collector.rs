@@ -16,7 +16,7 @@ use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::mir::visit::Visitor as MirVisitor;
 use rustc_middle::mir::{self, Local, Location};
 use rustc_middle::query::TyCtxtAt;
-use rustc_middle::ty::adjustment::{CustomCoerceUnsized, PointerCast};
+use rustc_middle::ty::adjustment::{CustomCoerceUnsized, PointerCoercion};
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::subst::{GenericArgKind, InternalSubsts};
 use rustc_middle::ty::{
@@ -37,12 +37,12 @@ fn custom_coerce_unsize_info<'tcx>(
     source_ty: Ty<'tcx>,
     target_ty: Ty<'tcx>,
 ) -> CustomCoerceUnsized {
-    let trait_ref = ty::Binder::dummy(ty::TraitRef::from_lang_item(
+    let trait_ref = ty::TraitRef::from_lang_item(
         tcx.tcx,
         LangItem::CoerceUnsized,
         tcx.span,
         [source_ty, target_ty],
-    ));
+    );
 
     match tcx.codegen_select_candidate((param_env, trait_ref)) {
         Ok(traits::ImplSource::UserDefined(traits::ImplSourceUserDefinedData {
@@ -61,40 +61,41 @@ pub enum MonoItemCollectionMode {
     Lazy,
 }
 
-/// Maps every mono item to all mono items it references in its
-/// body.
 pub struct UsageMap<'tcx> {
-    // Maps a source mono item to the range of mono items
-    // accessed by it.
-    // The range selects elements within the `targets` vecs.
-    index: FxHashMap<MonoItem<'tcx>, Range<usize>>,
-    targets: Vec<Spanned<MonoItem<'tcx>>>,
+    // Maps every mono item to the mono items used by it. Those mono items
+    // are represented as a range, which indexes into `used_items`.
+    used_map: FxHashMap<MonoItem<'tcx>, Range<usize>>,
+
+    // A mono item that is used by N different other mono items will appear
+    // here N times. Indexed into by the ranges in `used_map`.
+    used_items: Vec<Spanned<MonoItem<'tcx>>>,
 }
 
 impl<'tcx> UsageMap<'tcx> {
     fn new() -> UsageMap<'tcx> {
         UsageMap {
-            index: FxHashMap::default(),
-            targets: Vec::new(),
+            used_map: FxHashMap::default(),
+            used_items: Vec::new(),
         }
     }
 
-    fn record_accesses(&mut self, source: MonoItem<'tcx>, new_targets: &[Spanned<MonoItem<'tcx>>]) {
-        let start_index = self.targets.len();
+    fn record_used(&mut self, user_item: MonoItem<'tcx>, used_items: &[Spanned<MonoItem<'tcx>>]) {
+        let old_len = self.used_items.len();
 
-        self.targets.extend_from_slice(new_targets);
+        self.used_items.extend_from_slice(used_items);
 
-        let end_index = self.targets.len();
-        assert!(self.index.insert(source, start_index..end_index).is_none());
+        let new_len = self.used_items.len();
+        let new_items_range = old_len..new_len;
+        assert!(self.used_map.insert(user_item, new_items_range).is_none());
     }
 
     // Internally iterate over all items and the things each accesses.
-    pub fn iter_accesses<F>(&self, mut f: F)
+    pub fn for_each_item_and_its_used_items<F>(&self, mut f: F)
     where
         F: FnMut(MonoItem<'tcx>, &[Spanned<MonoItem<'tcx>>]),
     {
-        for (&accessor, range) in &self.index {
-            f(accessor, &self.targets[range.clone()])
+        for (&item, range) in &self.used_map {
+            f(item, &self.used_items[range.clone()])
         }
     }
 }
@@ -114,12 +115,12 @@ pub fn collect_crate_mono_items(
     debug!("building mono item graph, beginning at roots");
 
     let mut visited = MTLock::new(FxHashSet::default());
-    let mut access_map = MTLock::new(UsageMap::new());
+    let mut usage_map = MTLock::new(UsageMap::new());
     let recursion_limit = tcx.recursion_limit();
 
     {
         let visited: MTLockRef<'_, _> = &mut visited;
-        let access_map: MTLockRef<'_, _> = &mut access_map;
+        let usage_map: MTLockRef<'_, _> = &mut usage_map;
 
         tcx.sess.time("monomorphization_collector_graph_walk", || {
             par_for_each_in(roots, |root| {
@@ -139,14 +140,14 @@ pub fn collect_crate_mono_items(
                         visited,
                         &mut recursion_depths,
                         recursion_limit,
-                        access_map,
+                        usage_map,
                     );
                 }
             });
         });
     }
 
-    (visited.into_inner(), access_map.into_inner())
+    (visited.into_inner(), usage_map.into_inner())
 }
 
 // Find all non-generic items by walking the HIR. These items serve as roots to
@@ -201,14 +202,14 @@ fn collect_items_rec<'tcx>(
     visited: MTLockRef<'_, FxHashSet<MonoItem<'tcx>>>,
     recursion_depths: &mut DefIdMap<usize>,
     recursion_limit: Limit,
-    access_map: MTLockRef<'_, UsageMap<'tcx>>,
+    usage_map: MTLockRef<'_, UsageMap<'tcx>>,
 ) {
     if !visited.lock_mut().insert(starting_item.node) {
         // We've been here already, no need to search again.
         return;
     }
 
-    let mut neighbors = Vec::new();
+    let mut used_items = Vec::new();
     let recursion_depth_reset;
 
     //
@@ -245,13 +246,13 @@ fn collect_items_rec<'tcx>(
             debug_assert!(should_codegen_locally(tcx, &instance));
 
             let ty = instance.ty(tcx, ty::ParamEnv::reveal_all());
-            visit_drop_use(tcx, ty, true, starting_item.span, &mut neighbors);
+            visit_drop_use(tcx, ty, true, starting_item.span, &mut used_items);
 
             recursion_depth_reset = None;
 
             if let Ok(alloc) = tcx.eval_static_initializer(def_id) {
                 for id in alloc.inner().provenance().provenances() {
-                    collect_miri(tcx, id, &mut neighbors);
+                    collect_miri(tcx, id, &mut used_items);
                 }
             }
         }
@@ -270,7 +271,7 @@ fn collect_items_rec<'tcx>(
             check_type_length_limit(tcx, instance);
 
             rustc_data_structures::stack::ensure_sufficient_stack(|| {
-                collect_neighbours(tcx, instance, &mut neighbors);
+                collect_used_items(tcx, instance, &mut used_items);
             });
         }
         MonoItem::GlobalAsm(item_id) => {
@@ -289,11 +290,11 @@ fn collect_items_rec<'tcx>(
                             let fn_ty = tcx
                                 .typeck_body(anon_const.body)
                                 .node_type(anon_const.hir_id);
-                            visit_fn_use(tcx, fn_ty, false, *op_sp, &mut neighbors);
+                            visit_fn_use(tcx, fn_ty, false, *op_sp, &mut used_items);
                         }
                         hir::InlineAsmOperand::SymStatic { path: _, def_id } => {
                             trace!("collecting static {:?}", def_id);
-                            neighbors.push(dummy_spanned(MonoItem::Static(*def_id)));
+                            used_items.push(dummy_spanned(MonoItem::Static(*def_id)));
                         }
                         hir::InlineAsmOperand::In { .. }
                         | hir::InlineAsmOperand::Out { .. }
@@ -328,11 +329,11 @@ fn collect_items_rec<'tcx>(
         );
     }
 
-    access_map
+    usage_map
         .lock_mut()
-        .record_accesses(starting_item.node, &neighbors);
+        .record_used(starting_item.node, &used_items);
 
-    for neighbour in neighbors {
+    for neighbour in used_items {
         let should_gen = match neighbour.node {
             MonoItem::Static(def_id) => {
                 let instance = Instance::mono(tcx, def_id);
@@ -348,7 +349,7 @@ fn collect_items_rec<'tcx>(
                 visited,
                 recursion_depths,
                 recursion_limit,
-                access_map,
+                usage_map,
             );
         }
     }
@@ -475,14 +476,14 @@ fn check_type_length_limit<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) {
     }
 }
 
-struct MirNeighborCollector<'a, 'tcx> {
+struct MirUsedCollector<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     body: &'a mir::Body<'tcx>,
     output: &'a mut Vec<Spanned<MonoItem<'tcx>>>,
     instance: Instance<'tcx>,
 }
 
-impl<'a, 'tcx> MirNeighborCollector<'a, 'tcx> {
+impl<'a, 'tcx> MirUsedCollector<'a, 'tcx> {
     pub fn monomorphize<T>(&self, value: T) -> T
     where
         T: TypeFoldable<TyCtxt<'tcx>>,
@@ -491,12 +492,12 @@ impl<'a, 'tcx> MirNeighborCollector<'a, 'tcx> {
         self.instance.subst_mir_and_normalize_erasing_regions(
             self.tcx,
             ty::ParamEnv::reveal_all(),
-            ty::EarlyBinder(value),
+            ty::EarlyBinder::bind(value),
         )
     }
 }
 
-impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
+impl<'a, 'tcx> MirVisitor<'tcx> for MirUsedCollector<'a, 'tcx> {
     fn visit_rvalue(&mut self, rvalue: &mir::Rvalue<'tcx>, location: Location) {
         debug!("visiting rvalue {:?}", *rvalue);
 
@@ -507,7 +508,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
             // have to instantiate all methods of the trait being cast to, so we
             // can build the appropriate vtable.
             mir::Rvalue::Cast(
-                mir::CastKind::Pointer(PointerCast::Unsize),
+                mir::CastKind::PointerCoercion(PointerCoercion::Unsize),
                 ref operand,
                 target_ty,
             )
@@ -537,7 +538,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
                 }
             }
             mir::Rvalue::Cast(
-                mir::CastKind::Pointer(PointerCast::ReifyFnPointer),
+                mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer),
                 ref operand,
                 _,
             ) => {
@@ -546,7 +547,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
                 visit_fn_use(self.tcx, fn_ty, false, span, &mut self.output);
             }
             mir::Rvalue::Cast(
-                mir::CastKind::Pointer(PointerCast::ClosureFnPointer(_)),
+                mir::CastKind::PointerCoercion(PointerCoercion::ClosureFnPointer(_)),
                 ref operand,
                 _,
             ) => {
@@ -1189,13 +1190,13 @@ fn collect_miri<'tcx>(
 }
 
 /// Scans the MIR in order to find function calls, closures, and drop-glue.
-fn collect_neighbours<'tcx>(
+fn collect_used_items<'tcx>(
     tcx: TyCtxt<'tcx>,
     instance: Instance<'tcx>,
     output: &mut Vec<Spanned<MonoItem<'tcx>>>,
 ) {
     let body = tcx.instance_mir(instance.def);
-    MirNeighborCollector {
+    MirUsedCollector {
         tcx,
         body: &body,
         output,

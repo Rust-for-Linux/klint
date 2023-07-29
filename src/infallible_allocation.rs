@@ -32,7 +32,7 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
         let mut forward = FxHashMap::default();
         let mut backward = FxHashMap::<_, Vec<_>>::default();
 
-        access_map.iter_accesses(|accessor, accessees| {
+        access_map.for_each_item_and_its_used_items(|accessor, accessees| {
             let accessor = match accessor {
                 MonoItem::Static(s) => Instance::mono(cx.tcx, s),
                 MonoItem::Fn(v) => v,

@@ -259,6 +259,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let output_filenames = tcx.output_filenames(());
         let rmeta_path =
             rustc_session::output::filename_for_metadata(tcx.sess, crate_name, output_filenames);
+        let rmeta_path = rmeta_path.as_path();
 
         // Double check that the rmeta file is .rlib or .rmeta
         let ext = rmeta_path.extension().unwrap();

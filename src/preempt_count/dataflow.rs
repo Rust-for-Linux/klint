@@ -215,7 +215,7 @@ impl<'tcx> AnalysisDomain<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
 
 impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
     fn apply_statement_effect(
-        &self,
+        &mut self,
         _state: &mut Self::Domain,
         _statement: &rustc_middle::mir::Statement<'tcx>,
         _location: rustc_middle::mir::Location,
@@ -223,7 +223,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
     }
 
     fn apply_terminator_effect(
-        &self,
+        &mut self,
         state: &mut Self::Domain,
         terminator: &rustc_middle::mir::Terminator<'tcx>,
         location: rustc_middle::mir::Location,
@@ -243,7 +243,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                 let callee_ty = self.instance.subst_mir_and_normalize_erasing_regions(
                     self.checker.tcx,
                     self.param_env,
-                    ty::EarlyBinder(callee_ty),
+                    ty::EarlyBinder::bind(callee_ty),
                 );
                 if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
                     if let Some(v) = self.checker.preemption_count_annotation(def_id).adjustment {
@@ -282,7 +282,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                 let ty = self.instance.subst_mir_and_normalize_erasing_regions(
                     self.checker.tcx,
                     self.param_env,
-                    ty::EarlyBinder(ty),
+                    ty::EarlyBinder::bind(ty),
                 );
 
                 self.checker.call_stack.borrow_mut().push(UseSite {
@@ -312,7 +312,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
     }
 
     fn apply_call_return_effect(
-        &self,
+        &mut self,
         _state: &mut Self::Domain,
         _block: BasicBlock,
         _return_places: rustc_mir_dataflow::CallReturnPlaces<'_, 'tcx>,

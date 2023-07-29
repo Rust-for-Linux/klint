@@ -35,7 +35,7 @@ pub fn build_drop_shim<'tcx>(
 ) -> Body<'tcx> {
     if let ty::Generator(gen_def_id, substs, _) = ty.kind() {
         let body = cx.analysis_mir(*gen_def_id).generator_drop().unwrap();
-        let body = EarlyBinder(body.clone()).subst(cx.tcx, substs);
+        let body = EarlyBinder::bind(body.clone()).subst(cx.tcx, substs);
         return body;
     }
 

@@ -168,7 +168,7 @@ pub enum UseSiteKind {
         /// Span of the place being dropped.
         place_span: Span,
     },
-    PointerCast(Span),
+    PointerCoercion(Span),
     Vtable(Span),
 }
 
