@@ -210,7 +210,9 @@ impl crate::ctxt::PersistentQuery for drop_preemption_count_annotation {
 
 memoize!(
     pub fn should_report_preempt_count<'tcx>(cx: &AnalysisCtxt<'tcx>, def_id: DefId) -> bool {
-        let Some(local_def_id) = def_id.as_local() else { return false };
+        let Some(local_def_id) = def_id.as_local() else {
+            return false;
+        };
 
         let hir_id = cx.hir().local_def_id_to_hir_id(local_def_id);
         for attr in cx.klint_attributes(hir_id).iter() {
@@ -226,7 +228,9 @@ memoize!(
 
 memoize!(
     pub fn should_dump_mir<'tcx>(cx: &AnalysisCtxt<'tcx>, def_id: DefId) -> bool {
-        let Some(local_def_id) = def_id.as_local() else { return false };
+        let Some(local_def_id) = def_id.as_local() else {
+            return false;
+        };
 
         let hir_id = cx.hir().local_def_id_to_hir_id(local_def_id);
         for attr in cx.klint_attributes(hir_id).iter() {

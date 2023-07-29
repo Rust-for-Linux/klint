@@ -138,12 +138,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         // A catch-all error. MIR building usually should just have one `Return` terminator
         // so this usually shouldn't happen.
         let Some(return_bb) = return_bb else {
-            return self.emit_with_use_site_info(self.tcx
-                .sess
-                .struct_span_err(
-                    self.tcx.def_span(instance.def_id()),
-                    "cannot infer preemption count adjustment of this function",
-                ));
+            return self.emit_with_use_site_info(self.tcx.sess.struct_span_err(
+                self.tcx.def_span(instance.def_id()),
+                "cannot infer preemption count adjustment of this function",
+            ));
         };
 
         // Find the deepest single-value block in the dominator tree.
@@ -361,7 +359,9 @@ memoize!(
                 let mut adj = 0i32;
                 for elem_ty in list.iter() {
                     let elem_adj = cx.drop_adjustment(param_env.and(elem_ty))?;
-                    let Some(new_adj) = adj.checked_add(elem_adj) else { cx.drop_adjustment_overflow(poly_ty)? };
+                    let Some(new_adj) = adj.checked_add(elem_adj) else {
+                        cx.drop_adjustment_overflow(poly_ty)?
+                    };
                     adj = new_adj;
                 }
                 return Ok(adj);
@@ -423,8 +423,12 @@ memoize!(
                 if elem_adj == 0 {
                     return Ok(0);
                 }
-                let Ok(size) = i32::try_from(size?) else { cx.drop_adjustment_overflow(poly_ty)? };
-                let Some(adj) = size.checked_mul(elem_adj) else { cx.drop_adjustment_overflow(poly_ty)? };
+                let Ok(size) = i32::try_from(size?) else {
+                    cx.drop_adjustment_overflow(poly_ty)?
+                };
+                let Some(adj) = size.checked_mul(elem_adj) else {
+                    cx.drop_adjustment_overflow(poly_ty)?
+                };
                 return Ok(adj);
             }
 

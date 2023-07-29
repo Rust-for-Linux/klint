@@ -404,8 +404,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 let size = size
                     .try_eval_target_usize(self.tcx, param_env)
                     .ok_or(Error::TooGeneric)?;
-                let Ok(size) = i32::try_from(size) else { return Ok(()); };
-                let Some(last_adj) = (size - 1).checked_mul(elem_adj) else { return Ok(()); };
+                let Ok(size) = i32::try_from(size) else {
+                    return Ok(());
+                };
+                let Some(last_adj) = (size - 1).checked_mul(elem_adj) else {
+                    return Ok(());
+                };
                 let last_adj_bound = AdjustmentBounds::single_value(last_adj);
                 return self.report_drop_expectation_error(
                     param_env,
@@ -724,8 +728,12 @@ memoize!(
 
                 // If any error happens here, it'll happen in adjustment calculation too, so just return
                 // to avoid duplicate errors.
-                let Ok(size) = i32::try_from(size?) else { return Ok(ExpectationRange::top()); };
-                let Some(last_adj) = (size - 1).checked_mul(elem_adj) else { return Ok(ExpectationRange::top()); };
+                let Ok(size) = i32::try_from(size?) else {
+                    return Ok(ExpectationRange::top());
+                };
+                let Some(last_adj) = (size - 1).checked_mul(elem_adj) else {
+                    return Ok(ExpectationRange::top());
+                };
 
                 let last_adj_bound = AdjustmentBounds::single_value(last_adj);
 

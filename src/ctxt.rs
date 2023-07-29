@@ -139,7 +139,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         let mut result = None;
         for path in self.tcx.crate_extern_paths(cnum) {
-            let Some(ext) = path.extension() else { continue };
+            let Some(ext) = path.extension() else {
+                continue;
+            };
             if ext == "rlib" || ext == "rmeta" {
                 let klint_path = path.with_extension("klint");
                 if !klint_path.exists() {

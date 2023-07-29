@@ -136,8 +136,12 @@ impl<'tcx> AttrParser<'tcx> {
             self.error(span, |diag| diag.help("identifier expected"))?;
         };
 
-        let TokenTree::Token(token, _) = prop else { return invalid_prop(prop.span()) };
-        let Some((name, _)) = token.ident() else { return invalid_prop(token.span) };
+        let TokenTree::Token(token, _) = prop else {
+            return invalid_prop(prop.span());
+        };
+        let Some((name, _)) = token.ident() else {
+            return invalid_prop(token.span);
+        };
 
         let need_eq = need_eq(name)?;
 
@@ -199,7 +203,10 @@ impl<'tcx> AttrParser<'tcx> {
                 ..
             },
             _,
-        ) = token else { expect_int(token.span())? };
+        ) = token
+        else {
+            expect_int(token.span())?
+        };
         if lit.kind != token::LitKind::Integer || lit.suffix.is_some() {
             expect_int(token.span())?;
         }
@@ -231,18 +238,21 @@ impl<'tcx> AttrParser<'tcx> {
         ) {
             let token = cursor.next();
             let TokenTree::Token(
-                                token::Token {
-                                    kind: token::TokenKind::Literal(lit),
-                                    ..
-                                },
-                                _,
-                            ) = token else { expect_range(token.span())? };
+                token::Token {
+                    kind: token::TokenKind::Literal(lit),
+                    ..
+                },
+                _,
+            ) = token
+            else {
+                expect_range(token.span())?
+            };
             if lit.kind != token::LitKind::Integer {
                 expect_range(token.span())?;
             }
             let Some(v) = lit.symbol.as_str().parse::<u32>().ok() else {
-                                expect_range(token.span())?;
-                            };
+                expect_range(token.span())?;
+            };
             start = v;
         }
 
@@ -284,18 +294,21 @@ impl<'tcx> AttrParser<'tcx> {
             } else {
                 let token = cursor.next();
                 let TokenTree::Token(
-                                    token::Token {
-                                        kind: token::TokenKind::Literal(lit),
-                                        ..
-                                    },
-                                    _,
-                                ) = token else { expect_range(token.span())? };
+                    token::Token {
+                        kind: token::TokenKind::Literal(lit),
+                        ..
+                    },
+                    _,
+                ) = token
+                else {
+                    expect_range(token.span())?
+                };
                 if lit.kind != token::LitKind::Integer {
                     expect_range(token.span())?;
                 }
                 let Some(range) = lit.symbol.as_str().parse::<u32>().ok() else {
-                                    expect_range(token.span())?;
-                                };
+                    expect_range(token.span())?;
+                };
 
                 end = Some(if inclusive { range + 1 } else { range });
             }
@@ -321,13 +334,15 @@ impl<'tcx> AttrParser<'tcx> {
         let mut expectation = None;
         let mut unchecked = false;
 
-        let ast::AttrArgs::Delimited(ast::DelimArgs{dspan: delim_span, tokens: tts, ..}) = &item.args else {
-            self.error(
-                attr.span,
-                |diag| {
-                    diag.help("correct usage looks like `#[kint::preempt_count(...)]`")
-                },
-            )?;
+        let ast::AttrArgs::Delimited(ast::DelimArgs {
+            dspan: delim_span,
+            tokens: tts,
+            ..
+        }) = &item.args
+        else {
+            self.error(attr.span, |diag| {
+                diag.help("correct usage looks like `#[kint::preempt_count(...)]`")
+            })?;
         };
 
         self.parse_comma_delimited(Cursor::new(tts.trees(), delim_span.close), |cursor| {
@@ -384,7 +399,9 @@ impl<'tcx> AttrParser<'tcx> {
     }
 
     fn parse(&self, attr: &ast::Attribute) -> Option<KlintAttribute> {
-        let ast::AttrKind::Normal(normal_attr) = &attr.kind else { return None };
+        let ast::AttrKind::Normal(normal_attr) = &attr.kind else {
+            return None;
+        };
         let item = &normal_attr.item;
         if item.path.segments[0].ident.name != *crate::symbol::klint {
             return None;
@@ -439,7 +456,9 @@ memoize!(
     ) -> Lrc<Vec<KlintAttribute>> {
         let mut v = Vec::new();
         for attr in cx.hir().attrs(hir_id) {
-            let Some(attr) = crate::attribute::parse_klint_attribute(cx.tcx, hir_id, attr) else { continue };
+            let Some(attr) = crate::attribute::parse_klint_attribute(cx.tcx, hir_id, attr) else {
+                continue;
+            };
             v.push(attr);
         }
         Lrc::new(v)

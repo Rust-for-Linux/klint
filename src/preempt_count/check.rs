@@ -34,8 +34,12 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
         target_ty: Ty<'tcx>,
         span: Span,
     ) -> Result<(), Error> {
-        let ty::Dynamic(ref source_trait_ref, ..) = source_ty.kind() else { bug!() };
-        let ty::Dynamic(ref target_trait_ref, ..) = target_ty.kind() else { bug!() };
+        let ty::Dynamic(ref source_trait_ref, ..) = source_ty.kind() else {
+            bug!()
+        };
+        let ty::Dynamic(ref target_trait_ref, ..) = target_ty.kind() else {
+            bug!()
+        };
 
         let source_annotation = source_trait_ref
             .principal()
