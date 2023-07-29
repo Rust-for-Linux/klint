@@ -6,6 +6,7 @@ on:
     # This runs at 01:53 UTC, a randomly generated time after
     # daily nightly release.
     - cron: '53 1 * * *'
+  workflow_dispatch: {}
 
 env:
   CARGO_TERM_COLOR: always
