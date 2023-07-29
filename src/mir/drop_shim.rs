@@ -33,14 +33,14 @@ pub fn build_drop_shim<'tcx>(
     param_env: ParamEnv<'tcx>,
     ty: Ty<'tcx>,
 ) -> Body<'tcx> {
-    if let ty::Generator(gen_def_id, substs, _) = ty.kind() {
+    if let ty::Generator(gen_def_id, args, _) = ty.kind() {
         let body = cx.analysis_mir(*gen_def_id).generator_drop().unwrap();
-        let body = EarlyBinder::bind(body.clone()).subst(cx.tcx, substs);
+        let body = EarlyBinder::bind(body.clone()).instantiate(cx.tcx, args);
         return body;
     }
 
-    let substs = cx.mk_substs(&[ty.into()]);
-    let sig = cx.fn_sig(def_id).subst(cx.tcx, substs);
+    let args = cx.mk_args(&[ty.into()]);
+    let sig = cx.fn_sig(def_id).instantiate(cx.tcx, args);
     let sig = cx.erase_late_bound_regions(sig);
     let span = cx.def_span(def_id);
 

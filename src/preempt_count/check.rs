@@ -1,13 +1,13 @@
 use super::*;
 use crate::ctxt::AnalysisCtxt;
 use rustc_hir::def_id::DefId;
-use rustc_hir::{Constness, LangItem};
+use rustc_hir::LangItem;
 use rustc_infer::traits::util::PredicateSet;
 use rustc_middle::mir::interpret::{AllocId, ConstValue, ErrorHandled, GlobalAlloc, Scalar};
 use rustc_middle::mir::{self, visit::Visitor as MirVisitor, Body, Location};
 use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::{
-    self, GenericParamDefKind, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, ToPredicate, Ty,
+    self, GenericArgs, GenericParamDefKind, Instance, ParamEnv, ParamEnvAnd, ToPredicate, Ty,
     TyCtxt, TypeFoldable, TypeVisitableExt,
 };
 
@@ -155,11 +155,10 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
             ) => {
                 let fn_ty = operand.ty(self.body, self.cx.tcx);
                 let fn_ty = self.monomorphize(fn_ty);
-                if let ty::FnDef(def_id, substs) = *fn_ty.kind() {
-                    let instance =
-                        ty::Instance::resolve(self.cx.tcx, self.param_env, def_id, substs)
-                            .unwrap()
-                            .ok_or(Error::TooGeneric)?;
+                if let ty::FnDef(def_id, args) = *fn_ty.kind() {
+                    let instance = ty::Instance::resolve(self.cx.tcx, self.param_env, def_id, args)
+                        .unwrap()
+                        .ok_or(Error::TooGeneric)?;
                     self.check_fn_pointer_cast(instance, span)?;
                 }
             }
@@ -171,11 +170,11 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 let source_ty = operand.ty(self.body, self.cx.tcx);
                 let source_ty = self.monomorphize(source_ty);
                 match *source_ty.kind() {
-                    ty::Closure(def_id, substs) => {
+                    ty::Closure(def_id, args) => {
                         let instance = Instance::resolve_closure(
                             self.cx.tcx,
                             def_id,
-                            substs,
+                            args,
                             ty::ClosureKind::FnOnce,
                         )
                         .ok_or(Error::TooGeneric)?;
@@ -251,11 +250,10 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 let callee_ty = func.ty(self.body, tcx);
                 let callee_ty = self.monomorphize(callee_ty);
 
-                if let ty::FnDef(def_id, substs) = *callee_ty.kind() {
-                    let instance =
-                        ty::Instance::resolve(self.cx.tcx, self.param_env, def_id, substs)
-                            .unwrap()
-                            .ok_or(Error::TooGeneric)?;
+                if let ty::FnDef(def_id, args) = *callee_ty.kind() {
+                    let instance = ty::Instance::resolve(self.cx.tcx, self.param_env, def_id, args)
+                        .unwrap()
+                        .ok_or(Error::TooGeneric)?;
                     self.cx.call_stack.borrow_mut().push(UseSite {
                         instance: self.param_env.and(self.instance),
                         kind: UseSiteKind::Call(span),
@@ -284,12 +282,12 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                     match *op {
                         mir::InlineAsmOperand::SymFn { ref value } => {
                             let fn_ty = self.monomorphize(value.literal.ty());
-                            if let ty::FnDef(def_id, substs) = *fn_ty.kind() {
+                            if let ty::FnDef(def_id, args) = *fn_ty.kind() {
                                 let instance = ty::Instance::resolve(
                                     self.cx.tcx,
                                     self.param_env,
                                     def_id,
-                                    substs,
+                                    args,
                                 )
                                 .unwrap()
                                 .ok_or(Error::TooGeneric)?;
@@ -531,18 +529,18 @@ memoize!(
                 }
 
                 for &entry in cx.own_existential_vtable_entries(trait_ref.def_id()) {
-                    let substs = trait_ref.map_bound(|trait_ref| {
-                        InternalSubsts::for_item(cx.tcx, entry, |param, _| match param.kind {
+                    let args = trait_ref.map_bound(|trait_ref| {
+                        GenericArgs::for_item(cx.tcx, entry, |param, _| match param.kind {
                             GenericParamDefKind::Lifetime => cx.tcx.lifetimes.re_erased.into(),
                             GenericParamDefKind::Type { .. }
                             | GenericParamDefKind::Const { .. } => {
-                                trait_ref.substs[param.index as usize]
+                                trait_ref.args[param.index as usize]
                             }
                         })
                     });
-                    let substs = cx.normalize_erasing_late_bound_regions(param_env, substs);
+                    let args = cx.normalize_erasing_late_bound_regions(param_env, args);
 
-                    let predicates = cx.predicates_of(entry).instantiate_own(cx.tcx, substs);
+                    let predicates = cx.predicates_of(entry).instantiate_own(cx.tcx, args);
                     if rustc_trait_selection::traits::impossible_predicates(
                         cx.tcx,
                         predicates.map(|(predicate, _)| predicate).collect(),
@@ -550,7 +548,7 @@ memoize!(
                         continue;
                     }
 
-                    let instance = ty::Instance::resolve(cx.tcx, param_env, entry, substs)
+                    let instance = ty::Instance::resolve(cx.tcx, param_env, entry, args)
                         .unwrap()
                         .ok_or(Error::TooGeneric)?;
                     let poly_instance = param_env.and(instance);
@@ -668,8 +666,8 @@ memoize!(
         }
 
         match ty.kind() {
-            ty::Closure(_, substs) => {
-                return cx.drop_check(param_env.and(substs.as_closure().tupled_upvars_ty()));
+            ty::Closure(_, args) => {
+                return cx.drop_check(param_env.and(args.as_closure().tupled_upvars_ty()));
             }
 
             // Generator drops are non-trivial, use the generated drop shims instead.
@@ -682,12 +680,12 @@ memoize!(
                 return Ok(());
             }
 
-            ty::Adt(def, substs) if def.is_box() => {
-                cx.drop_check(param_env.and(substs.type_at(0)))?;
+            ty::Adt(def, args) if def.is_box() => {
+                cx.drop_check(param_env.and(args.type_at(0)))?;
                 let drop_trait = cx.require_lang_item(LangItem::Drop, None);
                 let drop_fn = cx.associated_item_def_ids(drop_trait)[0];
                 let box_free =
-                    ty::Instance::resolve(cx.tcx, param_env, drop_fn, cx.mk_substs(&[ty.into()]))
+                    ty::Instance::resolve(cx.tcx, param_env, drop_fn, cx.mk_args(&[ty.into()]))
                         .unwrap()
                         .unwrap();
                 cx.instance_check(param_env.and(box_free))?;
@@ -695,13 +693,12 @@ memoize!(
             }
 
             ty::Adt(def, _) => {
-                // For Adts, we first try to not use any of the substs and just try the most
+                // For Adts, we first try to not use any of the args and just try the most
                 // polymorphic version of the type.
                 let poly_param_env = cx.param_env_reveal_all_normalized(def.did());
-                let poly_substs =
-                    cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
+                let poly_args = cx.erase_regions(GenericArgs::identity_for_item(cx.tcx, def.did()));
                 let poly_poly_ty =
-                    poly_param_env.and(cx.tcx.mk_ty_from_kind(ty::Adt(*def, poly_substs)));
+                    poly_param_env.and(cx.tcx.mk_ty_from_kind(ty::Adt(*def, poly_args)));
                 if poly_poly_ty != poly_ty {
                     match cx.drop_check(poly_poly_ty) {
                         Err(Error::TooGeneric) => (),
@@ -709,7 +706,7 @@ memoize!(
                     }
                 }
 
-                // If that fails, we try to use the substs.
+                // If that fails, we try to use the args.
                 // Fallthrough to the MIR drop shim based logic.
             }
 
@@ -725,8 +722,8 @@ memoize!(
 
         // Do not call `resolve_drop_in_place` because we need param_env.
         let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
-        let substs = cx.mk_substs(&[ty.into()]);
-        let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
+        let args = cx.mk_args(&[ty.into()]);
+        let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, args)
             .unwrap()
             .unwrap();
         let poly_instance = param_env.and(instance);
@@ -780,13 +777,11 @@ memoize!(
         }
 
         if matches!(instance.def, ty::InstanceDef::Item(_)) {
-            let poly_param_env = cx
-                .param_env_reveal_all_normalized(instance.def_id())
-                .with_constness(Constness::NotConst);
-            let poly_substs =
-                cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
+            let poly_param_env = cx.param_env_reveal_all_normalized(instance.def_id());
+            let poly_args =
+                cx.erase_regions(GenericArgs::identity_for_item(cx.tcx, instance.def_id()));
             let poly_poly_instance =
-                poly_param_env.and(Instance::new(instance.def_id(), poly_substs));
+                poly_param_env.and(Instance::new(instance.def_id(), poly_args));
             let generic = poly_poly_instance == poly_instance;
             if !generic {
                 match cx.instance_check(poly_poly_instance) {

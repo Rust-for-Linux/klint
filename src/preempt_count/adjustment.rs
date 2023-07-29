@@ -1,8 +1,8 @@
 use rustc_errors::{DiagnosticBuilder, EmissionGuarantee, MultiSpan};
 use rustc_hir::def_id::{CrateNum, DefId};
-use rustc_hir::{Constness, LangItem};
+use rustc_hir::LangItem;
 use rustc_middle::mir::{Body, TerminatorKind, UnwindAction};
-use rustc_middle::ty::{self, Instance, InternalSubsts, ParamEnv, ParamEnvAnd, Ty};
+use rustc_middle::ty::{self, GenericArgs, Instance, ParamEnv, ParamEnvAnd, Ty};
 use rustc_mir_dataflow::Analysis;
 use rustc_mir_dataflow::JoinSemiLattice;
 
@@ -21,8 +21,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
     fn poly_instance_of_def_id(&self, def_id: DefId) -> ParamEnvAnd<'tcx, Instance<'tcx>> {
         let poly_param_env = self.param_env_reveal_all_normalized(def_id);
-        let poly_substs = self.erase_regions(InternalSubsts::identity_for_item(self.tcx, def_id));
-        poly_param_env.and(Instance::new(def_id, poly_substs))
+        let poly_args = self.erase_regions(GenericArgs::identity_for_item(self.tcx, def_id));
+        poly_param_env.and(Instance::new(def_id, poly_args))
     }
 
     pub fn emit_with_use_site_info<G: EmissionGuarantee>(
@@ -348,8 +348,8 @@ memoize!(
         }
 
         match ty.kind() {
-            ty::Closure(_, substs) => {
-                return cx.drop_adjustment(param_env.and(substs.as_closure().tupled_upvars_ty()));
+            ty::Closure(_, args) => {
+                return cx.drop_adjustment(param_env.and(args.as_closure().tupled_upvars_ty()));
             }
 
             // Generator drops are non-trivial, use the generated drop shims instead.
@@ -367,12 +367,12 @@ memoize!(
                 return Ok(adj);
             }
 
-            ty::Adt(def, substs) if def.is_box() => {
-                let adj = cx.drop_adjustment(param_env.and(substs.type_at(0)))?;
+            ty::Adt(def, args) if def.is_box() => {
+                let adj = cx.drop_adjustment(param_env.and(args.type_at(0)))?;
                 let drop_trait = cx.require_lang_item(LangItem::Drop, None);
                 let drop_fn = cx.associated_item_def_ids(drop_trait)[0];
                 let box_free =
-                    ty::Instance::resolve(cx.tcx, param_env, drop_fn, cx.mk_substs(&[ty.into()]))
+                    ty::Instance::resolve(cx.tcx, param_env, drop_fn, cx.mk_args(&[ty.into()]))
                         .unwrap()
                         .unwrap();
                 let box_free_adj = cx.instance_adjustment(param_env.and(box_free))?;
@@ -383,13 +383,12 @@ memoize!(
             }
 
             ty::Adt(def, _) => {
-                // For Adts, we first try to not use any of the substs and just try the most
+                // For Adts, we first try to not use any of the args and just try the most
                 // polymorphic version of the type.
                 let poly_param_env = cx.param_env_reveal_all_normalized(def.did());
-                let poly_substs =
-                    cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
+                let poly_args = cx.erase_regions(GenericArgs::identity_for_item(cx.tcx, def.did()));
                 let poly_poly_ty =
-                    poly_param_env.and(cx.tcx.mk_ty_from_kind(ty::Adt(*def, poly_substs)));
+                    poly_param_env.and(cx.tcx.mk_ty_from_kind(ty::Adt(*def, poly_args)));
                 if poly_poly_ty != poly_ty {
                     match cx.drop_adjustment(poly_poly_ty) {
                         Err(Error::TooGeneric) => (),
@@ -397,7 +396,7 @@ memoize!(
                     }
                 }
 
-                // If that fails, we try to use the substs.
+                // If that fails, we try to use the args.
                 // Fallthrough to the MIR drop shim based logic.
 
                 if let Some(adj) = cx.drop_preemption_count_annotation(def.did()).adjustment {
@@ -462,8 +461,8 @@ memoize!(
 
         // Do not call `resolve_drop_in_place` because we need param_env.
         let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
-        let substs = cx.mk_substs(&[ty.into()]);
-        let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
+        let args = cx.mk_args(&[ty.into()]);
+        let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, args)
             .unwrap()
             .unwrap();
         let poly_instance = param_env.and(instance);
@@ -547,13 +546,12 @@ memoize!(
             ty::Adt(def, _) if def.is_box() => return Ok(()),
 
             ty::Adt(def, _) => {
-                // For Adts, we first try to not use any of the substs and just try the most
+                // For Adts, we first try to not use any of the args and just try the most
                 // polymorphic version of the type.
                 let poly_param_env = cx.param_env_reveal_all_normalized(def.did());
-                let poly_substs =
-                    cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, def.did()));
+                let poly_args = cx.erase_regions(GenericArgs::identity_for_item(cx.tcx, def.did()));
                 let poly_poly_ty =
-                    poly_param_env.and(cx.tcx.mk_ty_from_kind(ty::Adt(*def, poly_substs)));
+                    poly_param_env.and(cx.tcx.mk_ty_from_kind(ty::Adt(*def, poly_args)));
                 if poly_poly_ty != poly_ty {
                     match cx.drop_adjustment_check(poly_poly_ty) {
                         Err(Error::TooGeneric) => (),
@@ -561,7 +559,7 @@ memoize!(
                     }
                 }
 
-                // If that fails, we try to use the substs.
+                // If that fails, we try to use the args.
                 // Fallthrough to the MIR drop shim based logic.
 
                 annotation = cx.drop_preemption_count_annotation(def.did());
@@ -581,8 +579,8 @@ memoize!(
 
         // Do not call `resolve_drop_in_place` because we need param_env.
         let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, None);
-        let substs = cx.mk_substs(&[ty.into()]);
-        let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, substs)
+        let args = cx.mk_args(&[ty.into()]);
+        let instance = ty::Instance::resolve(cx.tcx, param_env, drop_in_place, args)
             .unwrap()
             .unwrap();
 
@@ -636,13 +634,11 @@ memoize!(
 
         let mut generic = false;
         if matches!(instance.def, ty::InstanceDef::Item(_)) {
-            let poly_param_env = cx
-                .param_env_reveal_all_normalized(instance.def_id())
-                .with_constness(Constness::NotConst);
-            let poly_substs =
-                cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
+            let poly_param_env = cx.param_env_reveal_all_normalized(instance.def_id());
+            let poly_args =
+                cx.erase_regions(GenericArgs::identity_for_item(cx.tcx, instance.def_id()));
             let poly_poly_instance =
-                poly_param_env.and(Instance::new(instance.def_id(), poly_substs));
+                poly_param_env.and(Instance::new(instance.def_id(), poly_args));
             generic = poly_poly_instance == poly_instance;
             if !generic {
                 match cx.instance_adjustment(poly_poly_instance) {
@@ -781,13 +777,11 @@ memoize!(
 
         // Prefer to do polymorphic check if possible.
         if matches!(instance.def, ty::InstanceDef::Item(_)) {
-            let poly_param_env = cx
-                .param_env_reveal_all_normalized(instance.def_id())
-                .with_constness(Constness::NotConst);
-            let poly_substs =
-                cx.erase_regions(InternalSubsts::identity_for_item(cx.tcx, instance.def_id()));
+            let poly_param_env = cx.param_env_reveal_all_normalized(instance.def_id());
+            let poly_args =
+                cx.erase_regions(GenericArgs::identity_for_item(cx.tcx, instance.def_id()));
             let poly_poly_instance =
-                poly_param_env.and(Instance::new(instance.def_id(), poly_substs));
+                poly_param_env.and(Instance::new(instance.def_id(), poly_args));
             let generic = poly_poly_instance == poly_instance;
             if !generic {
                 match cx.instance_adjustment_check(poly_poly_instance) {

@@ -1,7 +1,7 @@
-use rustc_hir::{def_id::LocalDefId, Constness};
+use rustc_hir::def_id::LocalDefId;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mir::mono::MonoItem;
-use rustc_middle::ty::{Instance, InternalSubsts, ParamEnv, TyCtxt};
+use rustc_middle::ty::{GenericArgs, Instance, ParamEnv, TyCtxt};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
 use rustc_span::Span;
 
@@ -337,12 +337,11 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
 
         let identity = cx
             .tcx
-            .erase_regions(InternalSubsts::identity_for_item(self.cx.tcx, def_id));
+            .erase_regions(GenericArgs::identity_for_item(self.cx.tcx, def_id));
         let instance = Instance::new(def_id.into(), identity);
         let param_and_instance = self
             .cx
             .param_env_reveal_all_normalized(def_id)
-            .with_constness(Constness::NotConst)
             .and(instance);
         let _ = self.cx.instance_adjustment(param_and_instance);
         let _ = self.cx.instance_expectation(param_and_instance);

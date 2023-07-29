@@ -276,7 +276,7 @@ impl<'a, 'tcx> DecodeContext<'a, 'tcx> {
         let vec_position =
             u64::from_le_bytes(bytes[bytes.len() - 8..].try_into().unwrap()) as usize;
         let mut decoder = MemDecoder::new(bytes, vec_position);
-        let interpret_alloc_index = Vec::<u32>::decode(&mut decoder);
+        let interpret_alloc_index = Vec::<u64>::decode(&mut decoder);
         let alloc_decoding_state =
             Lrc::new(interpret::AllocDecodingState::new(interpret_alloc_index));
 
