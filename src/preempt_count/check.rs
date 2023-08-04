@@ -509,7 +509,7 @@ memoize!(
             assert!(!poly_trait_ref.has_escaping_bound_vars());
 
             let mut visited = PredicateSet::new(cx.tcx);
-            let predicate = poly_trait_ref.without_const().to_predicate(cx.tcx);
+            let predicate = poly_trait_ref.to_predicate(cx.tcx);
             let mut stack: Vec<ty::PolyTraitRef<'tcx>> = vec![poly_trait_ref];
             visited.insert(predicate);
 
