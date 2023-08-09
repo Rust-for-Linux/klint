@@ -229,6 +229,16 @@ impl_lint_pass!(AtomicContext<'_> => [ATOMIC_CONTEXT]);
 
 impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
     fn check_crate(&mut self, _: &LateContext<'tcx>) {
+        // Skip checks for proc-macro crates.
+        if self
+            .cx
+            .sess
+            .crate_types()
+            .contains(&rustc_session::config::CrateType::ProcMacro)
+        {
+            return;
+        }
+
         use rustc_hir::intravisit as hir_visit;
         use rustc_hir::*;
 

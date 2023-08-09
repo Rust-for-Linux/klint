@@ -85,15 +85,7 @@ impl Callbacks for MyCallbacks {
                 original_optimized_mir(tcx, def_id)
             };
         });
-        config.register_lints = Some(Box::new(move |sess, lint_store| {
-            // Skip checks for proc-macro crates.
-            if sess
-                .crate_types()
-                .contains(&rustc_session::config::CrateType::ProcMacro)
-            {
-                return;
-            }
-
+        config.register_lints = Some(Box::new(move |_, lint_store| {
             lint_store.register_lints(&[&INCORRECT_ATTRIBUTE]);
             lint_store.register_lints(&[&infallible_allocation::INFALLIBLE_ALLOCATION]);
             lint_store.register_lints(&[&atomic_context::ATOMIC_CONTEXT]);
