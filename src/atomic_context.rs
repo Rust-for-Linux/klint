@@ -232,7 +232,6 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         // Skip checks for proc-macro crates.
         if self
             .cx
-            .sess
             .crate_types()
             .contains(&rustc_session::config::CrateType::ProcMacro)
         {
