@@ -1,4 +1,4 @@
-use rustc_middle::mir::{BasicBlock, Body, TerminatorKind};
+use rustc_middle::mir::{BasicBlock, Body, TerminatorEdges, TerminatorKind};
 use rustc_middle::ty::{self, Instance, ParamEnv};
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
@@ -222,19 +222,19 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
     ) {
     }
 
-    fn apply_terminator_effect(
+    fn apply_terminator_effect<'mir>(
         &mut self,
         state: &mut Self::Domain,
-        terminator: &rustc_middle::mir::Terminator<'tcx>,
+        terminator: &'mir rustc_middle::mir::Terminator<'tcx>,
         location: rustc_middle::mir::Location,
-    ) {
+    ) -> TerminatorEdges<'mir, 'tcx> {
         // Skip all unwinding paths.
         if self.body.basic_blocks[location.block].is_cleanup {
-            return;
+            return terminator.edges();
         }
 
         let AdjustmentBoundsOrError::Bounds(bounds) = state else {
-            return;
+            return terminator.edges();
         };
 
         let adjustment = match &terminator.kind {
@@ -291,7 +291,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                 self.checker.call_stack.borrow_mut().pop();
                 result
             }
-            _ => return,
+            _ => return terminator.edges(),
         };
 
         let adjustment = match adjustment {
@@ -299,18 +299,19 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
             Err(e) => {
                 // Too generic, need to bail out and retry after monomorphization.
                 *state = AdjustmentBoundsOrError::Error(e);
-                return;
+                return terminator.edges();
             }
         };
 
         *bounds = bounds.offset(adjustment);
+        terminator.edges()
     }
 
     fn apply_call_return_effect(
         &mut self,
         _state: &mut Self::Domain,
         _block: BasicBlock,
-        _return_places: rustc_mir_dataflow::CallReturnPlaces<'_, 'tcx>,
+        _return_places: rustc_middle::mir::terminator::CallReturnPlaces<'_, 'tcx>,
     ) {
     }
 }
