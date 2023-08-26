@@ -563,10 +563,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             if expected.is_empty() {
                 // This function will cause the entry state to be in an unsatisfiable condition.
                 // Generate an error.
-                let (kind, drop_span) = match data.terminator().kind {
-                    TerminatorKind::Drop { place, .. } => {
-                        ("drop", Some(body.local_decls[place.local].source_info.span))
-                    }
+                let (kind, drop_place) = match data.terminator().kind {
+                    TerminatorKind::Drop { place, .. } => ("drop", Some(place)),
                     _ => ("call", None),
                 };
                 let span = data.terminator().source_info.span;
@@ -578,8 +576,17 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     ),
                 );
 
-                if let Some(span) = drop_span {
+                if let Some(place) = drop_place {
+                    let span = body.local_decls[place.local].source_info.span;
                     diag.span_label(span, "the value being dropped is declared here");
+
+                    let ty = place.ty(body, self.tcx).ty;
+                    let ty = instance.subst_mir_and_normalize_erasing_regions(
+                        self.tcx,
+                        param_env,
+                        ty::EarlyBinder::bind(ty),
+                    );
+                    diag.span_label(span, format!("the type being dropped is `{ty}`"));
                 }
 
                 diag.note(format!(
