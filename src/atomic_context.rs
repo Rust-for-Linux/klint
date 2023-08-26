@@ -120,39 +120,113 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // Deallocation function will not sleep.
             "__rust_dealloc" | "__rg_dealloc" => USE_SPINLOCK,
 
-            // What krealloc does depend on flags. Assume it may sleep for conservative purpose.
-            "krealloc" => MIGHT_SLEEP,
-            "kfree" => USE_SPINLOCK,
-            "slab_is_available" => NO_ASSUMPTION,
+            // `init_module` and `cleanup_module` exposed from Rust modules are allowed to sleep.
+            "init_module" | "cleanup_module" => MIGHT_SLEEP,
 
-            // Error helpers.
-            "IS_ERR" | "PTR_ERR" | "errname" => NO_ASSUMPTION,
+            // FFI functions defined in C
 
-            // Refcount helpers.
-            "REFCOUNT_INIT" | "refcount_inc" | "refcount_dec_and_test" => NO_ASSUMPTION,
-
-            // Printk can be called from any context.
-            "_printk" | "_dev_printk" | "BUG" | "rust_fmt_argument" => NO_ASSUMPTION,
+            // bug.h
+            "BUG" => NO_ASSUMPTION,
             "rust_build_error" => NO_ASSUMPTION,
 
-            "ioremap" | "iounmap" => MIGHT_SLEEP,
+            // cdev.h
+            "cdev_alloc" | "cdev_add" | "cdev_del" => MIGHT_SLEEP,
 
+            // clk.h
+            "clk_get_rate"
+            | "clk_prepare_enable"
+            | "clk_disable_unprepare"
+            | "clk_get"
+            | "clk_put" => MIGHT_SLEEP,
+
+            // current.h
+            "get_current" => NO_ASSUMPTION,
+
+            // delay.h
+            "msleep" => MIGHT_SLEEP,
+
+            // device.h
+            "dev_name" => NO_ASSUMPTION,
+
+            // err.h
+            "IS_ERR" | "PTR_ERR" | "errname" => NO_ASSUMPTION,
+
+            // fs.h
+            "alloc_chrdev_region" | "unregister_chrdev_region" => MIGHT_SLEEP,
+
+            // fs_parser.h
+            "fs_param_is_bool" | "fs_param_is_enum" | "fs_param_is_s32" | "fs_param_is_string"
+            | "fs_param_is_u32" | "fs_param_is_u64" => NO_ASSUMPTION,
+
+            // gfp.h
+            "__free_pages" => USE_SPINLOCK,
+
+            // io.h
             // I/O functions do not sleep.
             "readb" | "readw" | "readl" | "readq" | "readb_relaxed" | "readw_relaxed"
             | "readl_relaxed" | "readq_relaxed" | "writeb" | "writew" | "writel" | "writeq"
             | "writeb_relaxed" | "writew_relaxed" | "writel_relaxed" | "writeq_relaxed"
             | "memcpy_fromio" => NO_ASSUMPTION,
+            "ioremap" | "iounmap" => MIGHT_SLEEP,
 
-            // `init_module` and `cleanup_module` exposed from Rust modules are allowed to sleep.
-            "init_module" | "cleanup_module" => MIGHT_SLEEP,
+            // irq.h
+            "handle_level_irq" | "handle_edge_irq" | "handle_bad_irq" => NO_ASSUMPTION,
 
+            // jiffies.h
+            "__msecs_to_jiffies" => NO_ASSUMPTION,
+
+            // kernel.h
+            "__cant_sleep" => (0, ExpectationRange { lo: 1, hi: None }),
+            "__might_sleep" => MIGHT_SLEEP,
+
+            // moduleparam.h
+            "kernel_param_lock" => MIGHT_SLEEP,
+            "kernel_param_unlock" => MIGHT_SLEEP,
+
+            // mutex.h
+            "__mutex_init" => NO_ASSUMPTION,
+            "mutex_lock" => MIGHT_SLEEP,
+            "mutex_unlock" => MIGHT_SLEEP,
+
+            // printk.h
+            // printk can be called from any context.
+            "_printk" | "_dev_printk" | "rust_fmt_argument" => NO_ASSUMPTION,
+
+            // random.h
             "wait_for_random_bytes" => MIGHT_SLEEP,
 
-            // Userspace memory access might fault, and thus sleep.
-            "copy_from_user" | "copy_to_user" | "clear_user" | "copy_from_iter"
-            | "copy_to_iter" | "iov_iter_zero" => MIGHT_SLEEP,
+            // rbtree.h
+            "rb_insert_color" | "rb_erase" | "rb_next" | "rb_prev" | "rb_first" | "rb_last"
+            | "rb_first_postorder" | "rb_next_postorder" | "rb_replace_node" | "rb_link_node" => {
+                NO_ASSUMPTION
+            }
 
-            // Spinlock functions.
+            // rcupdate.h
+            "rcu_read_lock" => SPIN_LOCK,
+            "rcu_read_unlock" => SPIN_UNLOCK,
+            "synchronize_rcu" => MIGHT_SLEEP,
+
+            // refcount.h
+            "REFCOUNT_INIT" | "refcount_inc" | "refcount_dec_and_test" => NO_ASSUMPTION,
+
+            // rwsem.h
+            "__init_rwsem" => NO_ASSUMPTION,
+            "down_read" | "down_write" => MIGHT_SLEEP,
+            "up_read" | "up_write" => MIGHT_SLEEP,
+
+            // sched.h
+            "schedule" => MIGHT_SLEEP,
+
+            // sched/signal.h
+            "signal_pending" => NO_ASSUMPTION,
+
+            // slab.h
+            // What krealloc does depend on flags. Assume it may sleep for conservative purpose.
+            "krealloc" => MIGHT_SLEEP,
+            "kfree" => USE_SPINLOCK,
+            "slab_is_available" => NO_ASSUMPTION,
+
+            // spinlock.h
             "__spin_lock_init" | "_raw_spin_lock_init" => NO_ASSUMPTION,
             "spin_lock" | "spin_lock_irqsave" | "raw_spin_lock" | "raw_spin_lock_irqsave" => {
                 SPIN_LOCK
@@ -162,49 +236,21 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             | "raw_spin_unlock"
             | "raw_spin_unlock_irqrestore" => SPIN_UNLOCK,
 
-            // Mutex functions.
-            "__init_rwsem" | "__mutex_init" => NO_ASSUMPTION,
-            "down_read" | "down_write" | "mutex_lock" | "kernel_param_lock" => MIGHT_SLEEP,
-            "up_read" | "up_write" | "mutex_unlock" | "kernel_param_unlock" => MIGHT_SLEEP,
+            // uaccess.h
+            // Userspace memory access might fault, and thus sleep.
+            "copy_from_user" | "copy_to_user" | "clear_user" | "copy_from_iter"
+            | "copy_to_iter" | "iov_iter_zero" => MIGHT_SLEEP,
 
-            // RCU
-            "rcu_read_lock" => SPIN_LOCK,
-            "rcu_read_unlock" => SPIN_UNLOCK,
-            "synchronize_rcu" => MIGHT_SLEEP,
-
-            // Scheduling related functions.
-            "get_current" | "signal_pending" => NO_ASSUMPTION,
-            "schedule" => MIGHT_SLEEP,
-
-            // Wait
+            // wait.h
             "init_wait" => NO_ASSUMPTION,
             "prepare_to_wait_exclusive" | "finish_wait" => USE_SPINLOCK,
             "init_waitqueue_func_entry" => NO_ASSUMPTION,
             "add_wait_queue" | "remove_wait_queue" => USE_SPINLOCK,
 
-            // Workqueue
+            // workqueue.h
             "__INIT_WORK_WITH_KEY" | "queue_work_on" => NO_ASSUMPTION,
             "destroy_workqueue" => MIGHT_SLEEP,
 
-            "dev_name" => NO_ASSUMPTION,
-
-            // IRQ handlers
-            "handle_level_irq" | "handle_edge_irq" | "handle_bad_irq" => NO_ASSUMPTION,
-
-            "cdev_alloc" | "cdev_add" | "cdev_del" => MIGHT_SLEEP,
-            "alloc_chrdev_region" | "unregister_chrdev_region" => MIGHT_SLEEP,
-            "clk_get_rate"
-            | "clk_prepare_enable"
-            | "clk_disable_unprepare"
-            | "clk_get"
-            | "clk_put" => MIGHT_SLEEP,
-
-            // Params
-            "fs_param_is_bool" | "fs_param_is_enum" | "fs_param_is_s32" | "fs_param_is_string"
-            | "fs_param_is_u32" | "fs_param_is_u64" => NO_ASSUMPTION,
-
-            "__cant_sleep" => (0, ExpectationRange { lo: 1, hi: None }),
-            "__might_sleep" | "msleep" => MIGHT_SLEEP,
             _ => {
                 warn!("Unable to determine property for FFI function `{}`", symbol);
                 return None;
