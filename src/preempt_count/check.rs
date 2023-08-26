@@ -302,7 +302,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 }
             }
             mir::TerminatorKind::Assert { .. }
-            | mir::TerminatorKind::UnwindTerminate
+            | mir::TerminatorKind::UnwindTerminate { .. }
             | mir::TerminatorKind::Goto { .. }
             | mir::TerminatorKind::SwitchInt { .. }
             | mir::TerminatorKind::UnwindResume
