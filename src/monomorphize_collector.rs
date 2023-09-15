@@ -252,7 +252,7 @@ fn collect_items_rec<'tcx>(
 
             if let Ok(alloc) = tcx.eval_static_initializer(def_id) {
                 for id in alloc.inner().provenance().provenances() {
-                    collect_miri(tcx, id, &mut used_items);
+                    collect_alloc(tcx, id, &mut used_items);
                 }
             }
         }
@@ -316,7 +316,7 @@ fn collect_items_rec<'tcx>(
     // Check for PMEs and emit a diagnostic if one happened. To try to show relevant edges of the
     // mono item graph.
     if tcx.sess.diagnostic().err_count() > error_count
-        && starting_item.node.is_generic_fn()
+        && starting_item.node.is_generic_fn(tcx)
         && starting_item.node.is_user_defined()
     {
         let formatted_item = with_no_trimmed_paths!(starting_item.node.to_string());
@@ -584,39 +584,15 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirUsedCollector<'a, 'tcx> {
     /// work, as some constants cannot be represented in the type system.
     fn visit_constant(&mut self, constant: &mir::Constant<'tcx>, location: Location) {
         let literal = self.monomorphize(constant.literal);
-        let val = match literal {
-            mir::ConstantKind::Val(val, _) => val,
-            mir::ConstantKind::Ty(ct) => match ct.kind() {
-                ty::ConstKind::Value(val) => self.tcx.valtree_to_const_val((ct.ty(), val)),
-                ty::ConstKind::Unevaluated(ct) => {
-                    debug!(?ct);
-                    let param_env = ty::ParamEnv::reveal_all();
-                    match self.tcx.const_eval_resolve(param_env, ct.expand(), None) {
-                        // The `monomorphize` call should have evaluated that constant already.
-                        Ok(val) => val,
-                        Err(ErrorHandled::Reported(_)) => return,
-                        Err(ErrorHandled::TooGeneric) => span_bug!(
-                            self.body.source_info(location).span,
-                            "collection encountered polymorphic constant: {:?}",
-                            literal
-                        ),
-                    }
-                }
-                _ => return,
-            },
-            mir::ConstantKind::Unevaluated(uv, _) => {
-                let param_env = ty::ParamEnv::reveal_all();
-                match self.tcx.const_eval_resolve(param_env, uv, None) {
-                    // The `monomorphize` call should have evaluated that constant already.
-                    Ok(val) => val,
-                    Err(ErrorHandled::Reported(_)) => return,
-                    Err(ErrorHandled::TooGeneric) => span_bug!(
-                        self.body.source_info(location).span,
-                        "collection encountered polymorphic constant: {:?}",
-                        literal
-                    ),
-                }
-            }
+        let param_env = ty::ParamEnv::reveal_all();
+        let val = match literal.eval(self.tcx, param_env, None) {
+            Ok(v) => v,
+            Err(ErrorHandled::Reported(_)) => return,
+            Err(ErrorHandled::TooGeneric) => span_bug!(
+                self.body.source_info(location).span,
+                "collection encountered polymorphic constant: {:?}",
+                literal
+            ),
         };
         collect_const_value(self.tcx, val, self.output);
         MirVisitor::visit_ty(self, literal.ty(), TyContext::Location(location));
@@ -1161,8 +1137,8 @@ fn create_mono_items_for_default_impls<'tcx>(
     }
 }
 
-/// Scans the miri alloc in order to find function calls, closures, and drop-glue.
-fn collect_miri<'tcx>(
+/// Scans the CTFE alloc in order to find function calls, closures, and drop-glue.
+fn collect_alloc<'tcx>(
     tcx: TyCtxt<'tcx>,
     alloc_id: AllocId,
     output: &mut Vec<Spanned<MonoItem<'tcx>>>,
@@ -1177,7 +1153,7 @@ fn collect_miri<'tcx>(
             trace!("collecting {:?} with {:#?}", alloc_id, alloc);
             for inner in alloc.inner().provenance().provenances() {
                 rustc_data_structures::stack::ensure_sufficient_stack(|| {
-                    collect_miri(tcx, inner, output);
+                    collect_alloc(tcx, inner, output);
                 });
             }
         }
@@ -1187,7 +1163,7 @@ fn collect_miri<'tcx>(
         }
         GlobalAlloc::VTable(ty, trait_ref) => {
             let alloc_id = tcx.vtable_allocation((ty, trait_ref));
-            collect_miri(tcx, alloc_id, output)
+            collect_alloc(tcx, alloc_id, output)
         }
     }
 }
@@ -1214,15 +1190,15 @@ fn collect_const_value<'tcx>(
     output: &mut Vec<Spanned<MonoItem<'tcx>>>,
 ) {
     match value {
-        ConstValue::Scalar(Scalar::Ptr(ptr, _size)) => collect_miri(tcx, ptr.provenance, output),
+        ConstValue::Scalar(Scalar::Ptr(ptr, _size)) => collect_alloc(tcx, ptr.provenance, output),
+        ConstValue::Indirect { alloc_id, .. } => collect_alloc(tcx, alloc_id, output),
         ConstValue::Slice {
             data: alloc,
             start: _,
             end: _,
-        }
-        | ConstValue::ByRef { alloc, .. } => {
+        } => {
             for id in alloc.inner().provenance().provenances() {
-                collect_miri(tcx, id, output);
+                collect_alloc(tcx, id, output);
             }
         }
         _ => {}

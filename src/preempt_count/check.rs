@@ -222,12 +222,12 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
             ConstValue::Scalar(Scalar::Ptr(ptr, _size)) => {
                 self.check_alloc(ptr.provenance, span)?;
             }
+            ConstValue::Indirect { alloc_id, .. } => self.check_alloc(alloc_id, span)?,
             ConstValue::Slice {
                 data: alloc,
                 start: _,
                 end: _,
-            }
-            | ConstValue::ByRef { alloc, .. } => {
+            } => {
                 for id in alloc.inner().provenance().provenances() {
                     self.check_alloc(id, span)?;
                 }
@@ -356,28 +356,13 @@ impl<'mir, 'tcx, 'cx> MirVisitor<'tcx> for MirNeighborVisitor<'mir, 'tcx, 'cx> {
         }
 
         let literal = self.monomorphize(constant.literal);
-        let val = match literal {
-            mir::ConstantKind::Val(val, _) => Ok(val),
-            mir::ConstantKind::Ty(ct) => match ct.kind() {
-                ty::ConstKind::Value(val) => Ok(self.cx.valtree_to_const_val((ct.ty(), val))),
-                ty::ConstKind::Unevaluated(ct) => Err(ct.expand()),
-                _ => return,
-            },
-            mir::ConstantKind::Unevaluated(uv, _) => Err(uv),
-        };
-        let val = match val {
-            Ok(val) => val,
-            Err(uv) => {
-                let param_env = ty::ParamEnv::reveal_all();
-                match self.cx.const_eval_resolve(param_env, uv, None) {
-                    // The `monomorphize` call should have evaluated that constant already.
-                    Ok(val) => val,
-                    Err(ErrorHandled::Reported(_)) => return,
-                    Err(ErrorHandled::TooGeneric) => {
-                        self.result = Err(Error::TooGeneric);
-                        return;
-                    }
-                }
+        let param_env = ty::ParamEnv::reveal_all();
+        let val = match literal.eval(self.cx.tcx, param_env, None) {
+            Ok(v) => v,
+            Err(ErrorHandled::Reported(_)) => return,
+            Err(ErrorHandled::TooGeneric) => {
+                self.result = Err(Error::TooGeneric);
+                return;
             }
         };
 
