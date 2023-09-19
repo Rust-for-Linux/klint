@@ -359,8 +359,8 @@ impl<'mir, 'tcx, 'cx> MirVisitor<'tcx> for MirNeighborVisitor<'mir, 'tcx, 'cx> {
         let param_env = ty::ParamEnv::reveal_all();
         let val = match literal.eval(self.cx.tcx, param_env, None) {
             Ok(v) => v,
-            Err(ErrorHandled::Reported(_)) => return,
-            Err(ErrorHandled::TooGeneric) => {
+            Err(ErrorHandled::Reported(..)) => return,
+            Err(ErrorHandled::TooGeneric(..)) => {
                 self.result = Err(Error::TooGeneric);
                 return;
             }

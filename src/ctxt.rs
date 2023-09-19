@@ -255,10 +255,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     }
 
     pub fn new(tcx: TyCtxt<'tcx>) -> Self {
-        let crate_name = tcx.crate_name(LOCAL_CRATE);
         let output_filenames = tcx.output_filenames(());
         let rmeta_path =
-            rustc_session::output::filename_for_metadata(tcx.sess, crate_name, output_filenames);
+            rustc_session::output::filename_for_metadata(tcx.sess, output_filenames);
         let rmeta_path = rmeta_path.as_path();
 
         // Double check that the rmeta file is .rlib or .rmeta
