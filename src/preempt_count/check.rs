@@ -3,7 +3,7 @@ use crate::ctxt::AnalysisCtxt;
 use rustc_hir::def_id::DefId;
 use rustc_hir::LangItem;
 use rustc_infer::traits::util::PredicateSet;
-use rustc_middle::mir::interpret::{AllocId, ConstValue, ErrorHandled, GlobalAlloc, Scalar};
+use rustc_middle::mir::interpret::{AllocId, ErrorHandled, GlobalAlloc, Scalar};
 use rustc_middle::mir::{self, visit::Visitor as MirVisitor, Body, Location};
 use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::{
@@ -217,16 +217,15 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
         Ok(())
     }
 
-    fn check_const(&mut self, value: ConstValue, span: Span) -> Result<(), Error> {
+    fn check_const(&mut self, value: mir::ConstValue, span: Span) -> Result<(), Error> {
         match value {
-            ConstValue::Scalar(Scalar::Ptr(ptr, _size)) => {
+            mir::ConstValue::Scalar(Scalar::Ptr(ptr, _size)) => {
                 self.check_alloc(ptr.provenance, span)?;
             }
-            ConstValue::Indirect { alloc_id, .. } => self.check_alloc(alloc_id, span)?,
-            ConstValue::Slice {
+            mir::ConstValue::Indirect { alloc_id, .. } => self.check_alloc(alloc_id, span)?,
+            mir::ConstValue::Slice {
                 data: alloc,
-                start: _,
-                end: _,
+                meta: _,
             } => {
                 for id in alloc.inner().provenance().provenances() {
                     self.check_alloc(id, span)?;
@@ -281,7 +280,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 for op in operands {
                     match *op {
                         mir::InlineAsmOperand::SymFn { ref value } => {
-                            let fn_ty = self.monomorphize(value.literal.ty());
+                            let fn_ty = self.monomorphize(value.const_.ty());
                             if let ty::FnDef(def_id, args) = *fn_ty.kind() {
                                 let instance = ty::Instance::resolve(
                                     self.cx.tcx,
@@ -350,14 +349,14 @@ impl<'mir, 'tcx, 'cx> MirVisitor<'tcx> for MirNeighborVisitor<'mir, 'tcx, 'cx> {
         self.super_rvalue(rvalue, location);
     }
 
-    fn visit_constant(&mut self, constant: &mir::Constant<'tcx>, location: Location) {
+    fn visit_constant(&mut self, constant: &mir::ConstOperand<'tcx>, location: Location) {
         if self.result.is_err() {
             return;
         }
 
-        let literal = self.monomorphize(constant.literal);
+        let const_ = self.monomorphize(constant.const_);
         let param_env = ty::ParamEnv::reveal_all();
-        let val = match literal.eval(self.cx.tcx, param_env, None) {
+        let val = match const_.eval(self.cx.tcx, param_env, None) {
             Ok(v) => v,
             Err(ErrorHandled::Reported(..)) => return,
             Err(ErrorHandled::TooGeneric(..)) => {

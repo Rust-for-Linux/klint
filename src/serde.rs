@@ -8,7 +8,6 @@ use rustc_session::StableCrateId;
 use rustc_span::def_id::{CrateNum, DefIndex};
 use rustc_span::source_map::StableSourceFileId;
 use rustc_span::{BytePos, SourceFile, Span, SyntaxContext, DUMMY_SP};
-use std::mem::MaybeUninit;
 
 // This is the last available version of `MemEncoder` in rustc_serialize::opaque before its removal.
 pub struct MemEncoder {
@@ -33,20 +32,9 @@ impl MemEncoder {
 macro_rules! write_leb128 {
     ($enc:expr, $value:expr, $int_ty:ty, $fun:ident) => {{
         const MAX_ENCODED_LEN: usize = rustc_serialize::leb128::max_leb128_len::<$int_ty>();
-        let old_len = $enc.data.len();
-
-        if MAX_ENCODED_LEN > $enc.data.capacity() - old_len {
-            $enc.data.reserve(MAX_ENCODED_LEN);
-        }
-
-        // SAFETY: The above check and `reserve` ensures that there is enough
-        // room to write the encoded value to the vector's internal buffer.
-        unsafe {
-            let buf = &mut *($enc.data.as_mut_ptr().add(old_len)
-                as *mut [MaybeUninit<u8>; MAX_ENCODED_LEN]);
-            let encoded = rustc_serialize::leb128::$fun(buf, $value);
-            $enc.data.set_len(old_len + encoded.len());
-        }
+        let mut buf = [0; MAX_ENCODED_LEN];
+        let encoded = rustc_serialize::leb128::$fun(&mut buf, $value);
+        $enc.data.extend_from_slice(&buf[..encoded]);
     }};
 }
 

@@ -8,7 +8,7 @@ use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::{self as hir, def::DefKind};
 use rustc_middle::mir::CallSource;
 use rustc_middle::mir::{
-    Body, Constant, LocalDecl, Operand, Place, ProjectionElem, Rvalue, SourceInfo, Statement,
+    Body, ConstOperand, LocalDecl, Operand, Place, ProjectionElem, Rvalue, SourceInfo, Statement,
     StatementKind, TerminatorKind,
 };
 use rustc_middle::ty::{self, TyCtxt};
@@ -63,14 +63,14 @@ fn remap_mir_for_const_eval_select<'tcx>(
         let terminator = bb.terminator.as_mut().expect("invalid terminator");
         match terminator.kind {
             TerminatorKind::Call {
-                func: Operand::Constant(box Constant { ref literal, .. }),
+                func: Operand::Constant(box ConstOperand { ref const_, .. }),
                 ref mut args,
                 destination,
                 target,
                 unwind,
                 fn_span,
                 ..
-            } if let ty::FnDef(def_id, _) = *literal.ty().kind()
+            } if let ty::FnDef(def_id, _) = *const_.ty().kind()
                 && tcx.item_name(def_id) == sym::const_eval_select
                 && tcx.is_intrinsic(def_id) =>
             {

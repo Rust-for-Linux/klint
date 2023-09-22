@@ -311,7 +311,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
         &mut self,
         _state: &mut Self::Domain,
         _block: BasicBlock,
-        _return_places: rustc_middle::mir::terminator::CallReturnPlaces<'_, 'tcx>,
+        _return_places: rustc_middle::mir::CallReturnPlaces<'_, 'tcx>,
     ) {
     }
 }
