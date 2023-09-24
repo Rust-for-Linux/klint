@@ -64,7 +64,7 @@ struct MyCallbacks;
 
 impl Callbacks for MyCallbacks {
     fn config(&mut self, config: &mut Config) {
-        config.override_queries = Some(|_, provider, _| {
+        config.override_queries = Some(|_, provider| {
             static ORIGINAL_OPTIMIZED_MIR: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
 
             ORIGINAL_OPTIMIZED_MIR.store(provider.optimized_mir as *mut (), Ordering::Relaxed);
