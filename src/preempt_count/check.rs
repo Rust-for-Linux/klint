@@ -21,7 +21,7 @@ struct MirNeighborVisitor<'mir, 'tcx, 'cx> {
 
 impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
     fn monomorphize<T: TypeFoldable<TyCtxt<'tcx>> + Clone>(&self, v: T) -> T {
-        self.instance.subst_mir_and_normalize_erasing_regions(
+        self.instance.instantiate_mir_and_normalize_erasing_regions(
             self.cx.tcx,
             self.param_env,
             ty::EarlyBinder::bind(v),

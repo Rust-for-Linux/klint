@@ -22,7 +22,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         Ok(match &terminator.kind {
             TerminatorKind::Call { func, .. } => {
                 let callee_ty = func.ty(body, self.tcx);
-                let callee_ty = instance.subst_mir_and_normalize_erasing_regions(
+                let callee_ty = instance.instantiate_mir_and_normalize_erasing_regions(
                     self.tcx,
                     param_env,
                     ty::EarlyBinder::bind(callee_ty),
@@ -51,7 +51,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             }
             TerminatorKind::Drop { place, .. } => {
                 let ty = place.ty(body, self.tcx).ty;
-                let ty = instance.subst_mir_and_normalize_erasing_regions(
+                let ty = instance.instantiate_mir_and_normalize_erasing_regions(
                     self.tcx,
                     param_env,
                     ty::EarlyBinder::bind(ty),
@@ -120,7 +120,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let mut span =
                         span.unwrap_or_else(|| data.terminator().source_info.span.into());
                     let callee_ty = func.ty(body, self.tcx);
-                    let callee_ty = instance.subst_mir_and_normalize_erasing_regions(
+                    let callee_ty = instance.instantiate_mir_and_normalize_erasing_regions(
                         self.tcx,
                         param_env,
                         ty::EarlyBinder::bind(callee_ty),
@@ -190,7 +190,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         multispan
                     });
                     let ty = place.ty(body, self.tcx).ty;
-                    let ty = instance.subst_mir_and_normalize_erasing_regions(
+                    let ty = instance.instantiate_mir_and_normalize_erasing_regions(
                         self.tcx,
                         param_env,
                         ty::EarlyBinder::bind(ty),
@@ -495,7 +495,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             let expectation = match &data.terminator().kind {
                 TerminatorKind::Call { func, .. } => {
                     let callee_ty = func.ty(body, self.tcx);
-                    let callee_ty = instance.subst_mir_and_normalize_erasing_regions(
+                    let callee_ty = instance.instantiate_mir_and_normalize_erasing_regions(
                         self.tcx,
                         param_env,
                         ty::EarlyBinder::bind(callee_ty),
@@ -524,7 +524,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 }
                 TerminatorKind::Drop { place, .. } => {
                     let ty = place.ty(body, self.tcx).ty;
-                    let ty = instance.subst_mir_and_normalize_erasing_regions(
+                    let ty = instance.instantiate_mir_and_normalize_erasing_regions(
                         self.tcx,
                         param_env,
                         ty::EarlyBinder::bind(ty),
@@ -581,7 +581,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     diag.span_label(span, "the value being dropped is declared here");
 
                     let ty = place.ty(body, self.tcx).ty;
-                    let ty = instance.subst_mir_and_normalize_erasing_regions(
+                    let ty = instance.instantiate_mir_and_normalize_erasing_regions(
                         self.tcx,
                         param_env,
                         ty::EarlyBinder::bind(ty),

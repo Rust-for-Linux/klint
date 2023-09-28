@@ -240,7 +240,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
         let adjustment = match &terminator.kind {
             TerminatorKind::Call { func, .. } => {
                 let callee_ty = func.ty(self.body, self.checker.tcx);
-                let callee_ty = self.instance.subst_mir_and_normalize_erasing_regions(
+                let callee_ty = self.instance.instantiate_mir_and_normalize_erasing_regions(
                     self.checker.tcx,
                     self.param_env,
                     ty::EarlyBinder::bind(callee_ty),
@@ -274,7 +274,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
             }
             TerminatorKind::Drop { place, .. } => {
                 let ty = place.ty(self.body, self.checker.tcx).ty;
-                let ty = self.instance.subst_mir_and_normalize_erasing_regions(
+                let ty = self.instance.instantiate_mir_and_normalize_erasing_regions(
                     self.checker.tcx,
                     self.param_env,
                     ty::EarlyBinder::bind(ty),
