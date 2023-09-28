@@ -96,6 +96,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             return Some(MIGHT_SLEEP);
         }
 
+        if symbol.starts_with("rust_doctest_") {
+            return Some(MIGHT_SLEEP);
+        }
+
         Some(match symbol {
             // Interfacing between libcore and panic runtime
             "rust_begin_unwind" => NO_ASSUMPTION,
