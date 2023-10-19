@@ -145,7 +145,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 DefKind::AssocFn | DefKind::Fn | DefKind::Closure => {
                     let generics = tcx.generics_of(def_id);
                     let needs_inline = generics.requires_monomorphization(tcx)
-                        || tcx.codegen_fn_attrs(def_id).requests_inline();
+                        || tcx.cross_crate_inlinable(def_id);
                     needs_inline
                 }
                 _ => false,
