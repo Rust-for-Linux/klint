@@ -22,8 +22,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     }
 
     fn core_out_of_band_annotation(&self, def_id: DefId) -> PreemptionCount {
-        if self.def_kind(def_id) == DefKind::AssocFn &&
-            let Some(impl_) = self.impl_of_method(def_id)
+        if self.def_kind(def_id) == DefKind::AssocFn
+            && let Some(impl_) = self.impl_of_method(def_id)
         {
             let self_ty = self.type_of(impl_);
             let Some(fn_name) = self.def_path(def_id).data.last().copied() else {
@@ -33,15 +33,15 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 return Default::default();
             };
 
-            if let Some(adt_def) = self_ty.skip_binder().ty_adt_def() &&
-                let data = self.def_path(adt_def.did()).data &&
-                data.len() == 3 &&
-                let DefPathData::TypeNs(task) = data[0].data &&
-                task == *crate::symbol::task &&
-                let DefPathData::TypeNs(wake) = data[1].data &&
-                wake == *crate::symbol::wake &&
-                let DefPathData::TypeNs(waker) = data[2].data &&
-                waker == *crate::symbol::Waker
+            if let Some(adt_def) = self_ty.skip_binder().ty_adt_def()
+                && let data = self.def_path(adt_def.did()).data
+                && data.len() == 3
+                && let DefPathData::TypeNs(task) = data[0].data
+                && task == *crate::symbol::task
+                && let DefPathData::TypeNs(wake) = data[1].data
+                && wake == *crate::symbol::wake
+                && let DefPathData::TypeNs(waker) = data[2].data
+                && waker == *crate::symbol::Waker
             {
                 if fn_name == sym::clone
                     || fn_name == *crate::symbol::wake
@@ -60,12 +60,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         let data = self.def_path(def_id).data;
 
-        if data.len() == 3 &&
-            let DefPathData::TypeNs(any) = data[0].data &&
-            any == sym::any &&
-            let DefPathData::TypeNs(any_trait) = data[1].data &&
-            any_trait == sym::Any &&
-            let DefPathData::ValueNs(_any_fn) = data[2].data
+        if data.len() == 3
+            && let DefPathData::TypeNs(any) = data[0].data
+            && any == sym::any
+            && let DefPathData::TypeNs(any_trait) = data[1].data
+            && any_trait == sym::Any
+            && let DefPathData::ValueNs(_any_fn) = data[2].data
         {
             // This is a `core::any::Any::_` function.
             return PreemptionCount {
@@ -75,12 +75,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             };
         }
 
-        if data.len() == 3 &&
-            let DefPathData::TypeNs(error) = data[0].data &&
-            error == *crate::symbol::error &&
-            let DefPathData::TypeNs(error_trait) = data[1].data &&
-            error_trait == sym::Error &&
-            let DefPathData::ValueNs(_any_fn) = data[2].data
+        if data.len() == 3
+            && let DefPathData::TypeNs(error) = data[0].data
+            && error == *crate::symbol::error
+            && let DefPathData::TypeNs(error_trait) = data[1].data
+            && error_trait == sym::Error
+            && let DefPathData::ValueNs(_any_fn) = data[2].data
         {
             // This is a `core::error::Error::_` function.
             return PreemptionCount {
@@ -90,12 +90,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             };
         }
 
-        if data.len() == 3 &&
-            let DefPathData::TypeNs(fmt) = data[0].data &&
-            fmt == sym::fmt &&
-            let DefPathData::TypeNs(_fmt_trait) = data[1].data &&
-            let DefPathData::ValueNs(fmt_fn) = data[2].data &&
-            fmt_fn == sym::fmt
+        if data.len() == 3
+            && let DefPathData::TypeNs(fmt) = data[0].data
+            && fmt == sym::fmt
+            && let DefPathData::TypeNs(_fmt_trait) = data[1].data
+            && let DefPathData::ValueNs(fmt_fn) = data[2].data
+            && fmt_fn == sym::fmt
         {
             // This is a `core::fmt::Trait::fmt` function.
             return PreemptionCount {
@@ -104,12 +104,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 unchecked: false,
             };
         }
-        if data.len() == 3 &&
-            let DefPathData::TypeNs(fmt) = data[0].data &&
-            fmt == sym::fmt &&
-            let DefPathData::TypeNs(write) = data[1].data &&
-            write == *crate::symbol::Write &&
-            let DefPathData::ValueNs(_write_fn) = data[2].data
+        if data.len() == 3
+            && let DefPathData::TypeNs(fmt) = data[0].data
+            && fmt == sym::fmt
+            && let DefPathData::TypeNs(write) = data[1].data
+            && write == *crate::symbol::Write
+            && let DefPathData::ValueNs(_write_fn) = data[2].data
         {
             // This is a `core::fmt::Write::write_{str, char, fmt}` function.
             return PreemptionCount {
@@ -118,11 +118,11 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 unchecked: false,
             };
         }
-        if data.len() == 2 &&
-            let DefPathData::TypeNs(fmt) = data[0].data &&
-            fmt == sym::fmt &&
-            let DefPathData::ValueNs(write) = data[1].data &&
-            write == *crate::symbol::write
+        if data.len() == 2
+            && let DefPathData::TypeNs(fmt) = data[0].data
+            && fmt == sym::fmt
+            && let DefPathData::ValueNs(write) = data[1].data
+            && write == *crate::symbol::write
         {
             // This is `core::fmt::write` function, which uses function pointers internally.
             return PreemptionCount {

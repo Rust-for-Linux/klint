@@ -1177,9 +1177,9 @@ memoize!(
         }
 
         // Addition check for trait impl methods.
-        if matches!(instance.def, ty::InstanceDef::Item(_)) &&
-            let Some(impl_) = cx.impl_of_method(instance.def_id()) &&
-            let Some(trait_) = cx.trait_id_of_impl(impl_)
+        if matches!(instance.def, ty::InstanceDef::Item(_))
+            && let Some(impl_) = cx.impl_of_method(instance.def_id())
+            && let Some(trait_) = cx.trait_id_of_impl(impl_)
         {
             let trait_def = cx.trait_def(trait_);
             let trait_item = cx
@@ -1190,15 +1190,25 @@ memoize!(
                 .trait_item_def_id
                 .unwrap();
             for ancestor in trait_def.ancestors(cx.tcx, impl_).unwrap() {
-                let Some(ancestor_item) = ancestor.item(cx.tcx, trait_item) else { continue };
-                if let Some(ancestor_exp) = cx.preemption_count_annotation(ancestor_item.def_id).expectation {
+                let Some(ancestor_item) = ancestor.item(cx.tcx, trait_item) else {
+                    continue;
+                };
+                if let Some(ancestor_exp) = cx
+                    .preemption_count_annotation(ancestor_item.def_id)
+                    .expectation
+                {
                     if !expectation.contains_range(ancestor_exp) {
                         let mut diag = cx.sess.struct_span_err(
                             cx.def_span(instance.def_id()),
                             format!("trait method annotated to have preemption count expectation of {ancestor_exp}"),
                         );
-                        diag.note(format!("but the expectation of this implementing function is {expectation}"));
-                        diag.span_note(cx.def_span(ancestor_item.def_id), "the trait method is defined here");
+                        diag.note(format!(
+                            "but the expectation of this implementing function is {expectation}"
+                        ));
+                        diag.span_note(
+                            cx.def_span(ancestor_item.def_id),
+                            "the trait method is defined here",
+                        );
                         if let Some(body) = body {
                             cx.report_body_expectation_error(
                                 param_env,
