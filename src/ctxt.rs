@@ -231,6 +231,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let (cnum, local_key) = Q::into_crate_and_local(key);
         assert!(cnum == LOCAL_CRATE);
 
+        // Avoid serialising anything if there are errors (to prevent errors from being encoded
+        // which can cause panic).
+        if self.sess.has_errors().is_some() {
+            return;
+        }
+
         let mut encode_ctx = crate::serde::EncodeContext::new(self.tcx, span);
         local_key.encode(&mut encode_ctx);
         let key_encoded = encode_ctx.finish();
