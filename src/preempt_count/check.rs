@@ -307,7 +307,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
             | mir::TerminatorKind::UnwindResume
             | mir::TerminatorKind::Return
             | mir::TerminatorKind::Unreachable => {}
-            mir::TerminatorKind::GeneratorDrop
+            mir::TerminatorKind::CoroutineDrop
             | mir::TerminatorKind::Yield { .. }
             | mir::TerminatorKind::FalseEdge { .. }
             | mir::TerminatorKind::FalseUnwind { .. } => bug!(),
@@ -654,8 +654,8 @@ memoize!(
                 return cx.drop_check(param_env.and(args.as_closure().tupled_upvars_ty()));
             }
 
-            // Generator drops are non-trivial, use the generated drop shims instead.
-            ty::Generator(..) => (),
+            // Coroutine drops are non-trivial, use the generated drop shims instead.
+            ty::Coroutine(..) => (),
 
             ty::Tuple(list) => {
                 for ty in list.iter() {

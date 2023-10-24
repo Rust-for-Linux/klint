@@ -352,8 +352,8 @@ memoize!(
                 return cx.drop_adjustment(param_env.and(args.as_closure().tupled_upvars_ty()));
             }
 
-            // Generator drops are non-trivial, use the generated drop shims instead.
-            ty::Generator(..) => (),
+            // Coroutine drops are non-trivial, use the generated drop shims instead.
+            ty::Coroutine(..) => (),
 
             ty::Tuple(list) => {
                 let mut adj = 0i32;
@@ -536,7 +536,7 @@ memoize!(
         let annotation;
         match ty.kind() {
             ty::Closure(..)
-            | ty::Generator(..)
+            | ty::Coroutine(..)
             | ty::Tuple(..)
             | ty::Dynamic(..)
             | ty::Array(..)

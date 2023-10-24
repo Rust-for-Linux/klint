@@ -336,8 +336,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 );
             }
 
-            // Generator drops are non-trivial, use the generated drop shims instead.
-            ty::Generator(..) => (),
+            // Coroutine drops are non-trivial, use the generated drop shims instead.
+            ty::Coroutine(..) => (),
 
             ty::Tuple(_list) => (),
 
@@ -644,8 +644,8 @@ memoize!(
                 return cx.drop_expectation(param_env.and(args.as_closure().tupled_upvars_ty()));
             }
 
-            // Generator drops are non-trivial, use the generated drop shims instead.
-            ty::Generator(..) => (),
+            // Coroutine drops are non-trivial, use the generated drop shims instead.
+            ty::Coroutine(..) => (),
 
             ty::Tuple(_list) => (),
 
@@ -860,7 +860,7 @@ memoize!(
         match ty.kind() {
             // These types are always inferred
             ty::Closure(..)
-            | ty::Generator(..)
+            | ty::Coroutine(..)
             | ty::Tuple(..)
             | ty::Dynamic(..)
             | ty::Array(..)

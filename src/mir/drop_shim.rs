@@ -33,8 +33,8 @@ pub fn build_drop_shim<'tcx>(
     param_env: ParamEnv<'tcx>,
     ty: Ty<'tcx>,
 ) -> Body<'tcx> {
-    if let ty::Generator(gen_def_id, args, _) = ty.kind() {
-        let body = cx.analysis_mir(*gen_def_id).generator_drop().unwrap();
+    if let ty::Coroutine(gen_def_id, args, _) = ty.kind() {
+        let body = cx.analysis_mir(*gen_def_id).coroutine_drop().unwrap();
         let body = EarlyBinder::bind(body.clone()).instantiate(cx.tcx, args);
         return body;
     }
