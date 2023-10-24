@@ -16,7 +16,7 @@ Note that klint is pinned to a Rust version so it is likely that running `cargo 
 
 To run this tool, use rustup which will prepare the necessary environment variables:
 ```
-rustup run beta klint
+rustup run 1.73.0 klint
 ```
 
 `klint` will behave like rustc, just with additional lints.
