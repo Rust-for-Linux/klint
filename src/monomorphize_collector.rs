@@ -25,7 +25,8 @@ use rustc_middle::ty::{
 use rustc_middle::{middle::codegen_fn_attrs::CodegenFnAttrFlags, mir::visit::TyContext};
 use rustc_session::config::EntryFnType;
 use rustc_session::Limit;
-use rustc_span::source_map::{dummy_spanned, respan, Span, Spanned, DUMMY_SP};
+use rustc_span::source_map::{dummy_spanned, respan, Spanned};
+use rustc_span::{Span, DUMMY_SP};
 use rustc_trait_selection::traits;
 use std::ops::Range;
 use std::path::PathBuf;

@@ -1,5 +1,6 @@
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
+use std::sync::Arc;
 
 use rusqlite::{Connection, OptionalExtension};
 use rustc_data_structures::fx::FxHashMap;
@@ -102,6 +103,21 @@ const SCHEMA_VERSION: u32 = 1;
 impl Drop for AnalysisCtxt<'_> {
     fn drop(&mut self) {
         self.local_conn.execute("commit", ()).unwrap();
+    }
+}
+
+// Used when parallel compiler is used.
+trait ArcDowncast: Sized {
+    fn downcast<T: Any>(self) -> Result<Arc<T>, Self>;
+}
+
+impl ArcDowncast for Arc<dyn Any> {
+    fn downcast<T: Any>(self) -> Result<Arc<T>, Self> {
+        if (*self).is::<T>() {
+            Ok(unsafe { Arc::from_raw(Arc::into_raw(self) as _) })
+        } else {
+            Err(self)
+        }
     }
 }
 
