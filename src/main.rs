@@ -17,6 +17,7 @@ extern crate rustc_index;
 extern crate rustc_infer;
 extern crate rustc_interface;
 extern crate rustc_lint;
+extern crate rustc_log;
 #[macro_use]
 extern crate rustc_macros;
 #[macro_use]
@@ -98,7 +99,7 @@ impl Callbacks for MyCallbacks {
 
 fn main() -> ExitCode {
     let handler = EarlyErrorHandler::new(ErrorOutputType::default());
-    rustc_driver::init_env_logger(&handler, "KLINT_LOG");
+    rustc_driver::init_logger(&handler, rustc_log::LoggerConfig::from_env("KLINT_LOG"));
     let args: Vec<_> = std::env::args().collect();
 
     match rustc_driver::RunCompiler::new(&args, &mut MyCallbacks).run() {
