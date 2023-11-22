@@ -41,7 +41,7 @@ pub fn build_drop_shim<'tcx>(
 
     let args = cx.mk_args(&[ty.into()]);
     let sig = cx.fn_sig(def_id).instantiate(cx.tcx, args);
-    let sig = cx.erase_late_bound_regions(sig);
+    let sig = cx.instantiate_bound_regions_with_erased(sig);
     let span = cx.def_span(def_id);
 
     let source_info = SourceInfo::outermost(span);
