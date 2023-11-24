@@ -1,5 +1,4 @@
 #![crate_type="lib"]
-#![feature(trait_upcasting)]
 
 #[klint::drop_preempt_count(expect = 0)]
 trait A {}
