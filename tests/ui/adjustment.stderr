@@ -16,5 +16,5 @@ note: while preemption count adjustment is 0 after this
 23 |     }
    |      ^
 
-error: aborting due to previous error
+error: aborting due to 1 previous error
 

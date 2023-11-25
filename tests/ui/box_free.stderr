@@ -9,5 +9,5 @@ error: freeing the box expects the preemption count to be 0
    = note: but the possible preemption count after dropping the content is 1
    = note: content being dropped is `SleepAndLockOnDrop`
 
-error: aborting due to previous error
+error: aborting due to 1 previous error
 

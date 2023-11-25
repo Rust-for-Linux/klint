@@ -42,5 +42,5 @@ warning: constructing this vtable may result in preemption count rule violation
    = help: adjustment is inferred to be 0 and expectation is inferred to be 0..
    = help: while the expected adjustment for vtable is 1 and the expectation is 0
 
-error: aborting due to previous error; 3 warnings emitted
+error: aborting due to 1 previous error; 3 warnings emitted
 

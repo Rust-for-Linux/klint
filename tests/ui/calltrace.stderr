@@ -19,5 +19,5 @@ note: which is called from here
 27 |     wrapper(LockOnDrop);
    |     ^^^^^^^^^^^^^^^^^^^
 
-error: aborting due to previous error
+error: aborting due to 1 previous error
 

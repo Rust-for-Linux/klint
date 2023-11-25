@@ -26,5 +26,5 @@ note: reporting preemption count for instance `drop_sleep`
    |
    = note: expectation is inferred to be 0
 
-error: aborting due to previous error
+error: aborting due to 1 previous error
 
