@@ -160,7 +160,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // Use the same logic as rustc use to determine if the MIR is needed for
             // downstream crates.
             let should_encode = match tcx.def_kind(def_id) {
-                DefKind::Ctor(_, _) | DefKind::Coroutine => true,
+                DefKind::Ctor(_, _) => true,
+                DefKind::Closure if tcx.is_coroutine(def_id.to_def_id()) => true,
                 DefKind::AssocFn | DefKind::Fn | DefKind::Closure => {
                     let generics = tcx.generics_of(def_id);
                     let needs_inline = generics.requires_monomorphization(tcx)
