@@ -152,7 +152,7 @@ memoize!(
             return cx.preemption_count_annotation_fallback(def_id);
         };
 
-        let hir_id = cx.hir().local_def_id_to_hir_id(local_def_id);
+        let hir_id = cx.local_def_id_to_hir_id(local_def_id);
         for attr in cx.klint_attributes(hir_id).iter() {
             match attr {
                 crate::attribute::KlintAttribute::PreemptionCount(pc) => {
@@ -186,7 +186,7 @@ memoize!(
             return cx.preemption_count_annotation_fallback(def_id);
         };
 
-        let hir_id = cx.hir().local_def_id_to_hir_id(local_def_id);
+        let hir_id = cx.local_def_id_to_hir_id(local_def_id);
         for attr in cx.klint_attributes(hir_id).iter() {
             match attr {
                 crate::attribute::KlintAttribute::DropPreemptionCount(pc) => {
@@ -214,7 +214,7 @@ memoize!(
             return false;
         };
 
-        let hir_id = cx.hir().local_def_id_to_hir_id(local_def_id);
+        let hir_id = cx.local_def_id_to_hir_id(local_def_id);
         for attr in cx.klint_attributes(hir_id).iter() {
             match attr {
                 crate::attribute::KlintAttribute::ReportPreeptionCount => return true,
@@ -232,7 +232,7 @@ memoize!(
             return false;
         };
 
-        let hir_id = cx.hir().local_def_id_to_hir_id(local_def_id);
+        let hir_id = cx.local_def_id_to_hir_id(local_def_id);
         for attr in cx.klint_attributes(hir_id).iter() {
             match attr {
                 crate::attribute::KlintAttribute::DumpMir => return true,
