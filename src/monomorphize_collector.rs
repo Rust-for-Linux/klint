@@ -321,7 +321,7 @@ fn collect_items_rec<'tcx>(
         && starting_item.node.is_user_defined()
     {
         let formatted_item = with_no_trimmed_paths!(starting_item.node.to_string());
-        tcx.sess.span_note_without_error(
+        tcx.sess.span_note(
             starting_item.span,
             format!(
                 "the above error was encountered while instantiating `{}`",

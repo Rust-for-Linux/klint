@@ -87,7 +87,7 @@ impl<'tcx> AttrParser<'tcx> {
         Err(self
             .tcx
             .sess
-            .delay_span_bug(span, "incorrect usage of `#[kint::preempt_count]`"))
+            .span_delayed_bug(span, "incorrect usage of `#[kint::preempt_count]`"))
     }
 
     fn parse_comma_delimited(

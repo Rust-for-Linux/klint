@@ -731,7 +731,7 @@ memoize!(
         }
 
         if cx.should_report_preempt_count(instance.def_id()) {
-            let mut diag = cx.sess.diagnostic().struct_note_without_error(format!(
+            let mut diag = cx.sess.diagnostic().struct_note(format!(
                 "reporting preemption count for instance `{}`",
                 PolyDisplay(&poly_instance)
             ));
