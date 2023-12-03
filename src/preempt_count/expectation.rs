@@ -127,6 +127,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     );
                     if let ty::FnDef(def_id, args) = *callee_ty.kind() {
                         if let Some(v) = self.preemption_count_annotation(def_id).expectation {
+                            // NOTE: for trait methods, the check above only checks for annotation
+                            // on trait method, but not on impl. After resolution below, we need to
+                            // check again for preemption count annotation!
                             if !span.has_primary_spans() {
                                 span = self.def_span(def_id).into();
                             }
@@ -148,6 +151,21 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
                             if !span.has_primary_spans() {
                                 span = self.def_span(callee_instance.def_id()).into();
+                            }
+
+                            if let Some(v) = self
+                                .preemption_count_annotation(callee_instance.def_id())
+                                .expectation
+                            {
+                                diag.span_note(
+                                    span,
+                                    format!(
+                                        "which may call this function with preemption count {}",
+                                        expected
+                                    ),
+                                );
+                                diag.note(format!("but the callee expects preemption count {}", v));
+                                return Ok(());
                             }
 
                             self.call_stack.borrow_mut().push(UseSite {
@@ -220,7 +238,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             return Ok(());
         }
 
-        unreachable!()
+        bug!("failed to report error on {:?}", instance);
     }
 
     // Expectation error reporting is similar to expectation inference, but the direction is reverted.
@@ -237,8 +255,6 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         span: MultiSpan,
         diag: &mut rustc_errors::DiagnosticBuilder<'_, G>,
     ) -> Result<(), Error> {
-        // let expectation = cx.instance_expectation(param_env.and(instance))?;
-
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceDef::Intrinsic(_) => unreachable!(),

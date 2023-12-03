@@ -1,0 +1,26 @@
+WARN klint::ctxt no klint metadata found for crate core
+error: function annotated to have preemption count expectation of 0..
+  --> $DIR/iflet.rs:14:1
+   |
+14 | pub fn foo(x: Option<X>) -> Option<X> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: but the expectation inferred is 0
+note: which may drop type `std::option::Option<X>` with preemption count 0..
+  --> $DIR/iflet.rs:19:1
+   |
+14 | pub fn foo(x: Option<X>) -> Option<X> {
+   |            - value being dropped is here
+...
+19 | }
+   | ^
+   = note: which may drop type `X` with preemption count 0..
+note: which may call this function with preemption count 0..
+  --> $DIR/iflet.rs:10:5
+   |
+10 |     fn drop(&mut self) {}
+   |     ^^^^^^^^^^^^^^^^^^
+   = note: but the callee expects preemption count 0
+
+error: aborting due to 1 previous error
+
