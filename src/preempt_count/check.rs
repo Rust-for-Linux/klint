@@ -202,7 +202,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
             GlobalAlloc::Memory(alloc) => {
                 for inner in alloc.inner().provenance().provenances() {
                     rustc_data_structures::stack::ensure_sufficient_stack(|| {
-                        self.check_alloc(inner, span)
+                        self.check_alloc(inner.alloc_id(), span)
                     })?;
                 }
             }
@@ -220,15 +220,15 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
     fn check_const(&mut self, value: mir::ConstValue, span: Span) -> Result<(), Error> {
         match value {
             mir::ConstValue::Scalar(Scalar::Ptr(ptr, _size)) => {
-                self.check_alloc(ptr.provenance, span)?;
+                self.check_alloc(ptr.provenance.alloc_id(), span)?;
             }
             mir::ConstValue::Indirect { alloc_id, .. } => self.check_alloc(alloc_id, span)?,
             mir::ConstValue::Slice {
                 data: alloc,
                 meta: _,
             } => {
-                for id in alloc.inner().provenance().provenances() {
-                    self.check_alloc(id, span)?;
+                for prov in alloc.inner().provenance().provenances() {
+                    self.check_alloc(prov.alloc_id(), span)?;
                 }
             }
             _ => {}
@@ -326,8 +326,8 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
 
         let span = self.cx.def_span(def_id);
         if let Ok(alloc) = self.cx.eval_static_initializer(def_id) {
-            for id in alloc.inner().provenance().provenances() {
-                self.check_alloc(id, span)?;
+            for prov in alloc.inner().provenance().provenances() {
+                self.check_alloc(prov.alloc_id(), span)?;
             }
         }
         Ok(())
