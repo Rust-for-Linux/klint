@@ -73,9 +73,7 @@ impl<'tcx> AttrParser<'tcx> {
     fn error(
         &self,
         span: Span,
-        decorate: impl for<'a, 'b> FnOnce(
-            &'b mut DiagnosticBuilder<'a, ()>,
-        ) -> &'b mut DiagnosticBuilder<'a, ()>,
+        decorate: impl for<'a, 'b> FnOnce(&'b mut DiagnosticBuilder<'a, ()>),
     ) -> Result<!, ErrorGuaranteed> {
         self.tcx.struct_span_lint_hir(
             crate::INCORRECT_ATTRIBUTE,
@@ -119,7 +117,7 @@ impl<'tcx> AttrParser<'tcx> {
                 )
             ) {
                 self.error(comma.span(), |diag| {
-                    diag.help("`,` expected between property values")
+                    diag.help("`,` expected between property values");
                 })?;
             }
         }
@@ -133,7 +131,9 @@ impl<'tcx> AttrParser<'tcx> {
     ) -> Result<Cursor<'a>, ErrorGuaranteed> {
         let prop = cursor.next();
         let invalid_prop = |span| {
-            self.error(span, |diag| diag.help("identifier expected"))?;
+            self.error(span, |diag| {
+                diag.help("identifier expected");
+            })?;
         };
 
         let TokenTree::Token(token, _) = prop else {
@@ -159,12 +159,12 @@ impl<'tcx> AttrParser<'tcx> {
         );
         if need_eq && !is_eq {
             self.error(eq.span(), |diag| {
-                diag.help("`=` expected after property name")
+                diag.help("`=` expected after property name");
             })?;
         }
         if !need_eq && is_eq {
             self.error(eq.span(), |diag| {
-                diag.help("unexpected `=` after property name")
+                diag.help("unexpected `=` after property name");
             })?;
         }
 
@@ -178,7 +178,11 @@ impl<'tcx> AttrParser<'tcx> {
     }
 
     fn parse_i32<'a>(&self, mut cursor: Cursor<'a>) -> Result<(i32, Cursor<'a>), ErrorGuaranteed> {
-        let expect_int = |span| self.error(span, |diag| diag.help("an integer expected"));
+        let expect_int = |span| {
+            self.error(span, |diag| {
+                diag.help("an integer expected");
+            })
+        };
 
         let negative = if matches!(
             cursor.look_ahead(0),
@@ -222,7 +226,11 @@ impl<'tcx> AttrParser<'tcx> {
         &self,
         mut cursor: Cursor<'a>,
     ) -> Result<((u32, Option<u32>), Cursor<'a>), ErrorGuaranteed> {
-        let expect_range = |span| self.error(span, |diag| diag.help("a range expected"));
+        let expect_range = |span| {
+            self.error(span, |diag| {
+                diag.help("a range expected");
+            })
+        };
 
         let start_span = cursor.look_ahead(0).span();
         let mut start = 0;
@@ -318,7 +326,7 @@ impl<'tcx> AttrParser<'tcx> {
             let end_span = cursor.next().span();
 
             self.error(start_span.until(end_span), |diag| {
-                diag.help("the preemption count expectation range must be non-empty")
+                diag.help("the preemption count expectation range must be non-empty");
             })?;
         }
 
@@ -341,7 +349,7 @@ impl<'tcx> AttrParser<'tcx> {
         }) = &item.args
         else {
             self.error(attr.span, |diag| {
-                diag.help("correct usage looks like `#[kint::preempt_count(...)]`")
+                diag.help("correct usage looks like `#[kint::preempt_count(...)]`");
             })?;
         };
 
@@ -357,7 +365,7 @@ impl<'tcx> AttrParser<'tcx> {
                             self.error(name.span, |diag| {
                                 diag.help(
                                     "unknown property, expected `adjust`, `expect` or `unchecked`",
-                                )
+                                );
                             })?;
                         }
                     })
@@ -387,7 +395,7 @@ impl<'tcx> AttrParser<'tcx> {
 
         if adjustment.is_none() && expectation.is_none() {
             self.error(item.args.span().unwrap(), |diag| {
-                diag.help("at least one of `adjust` or `expect` property must be specified")
+                diag.help("at least one of `adjust` or `expect` property must be specified");
             })?;
         }
 
@@ -412,7 +420,7 @@ impl<'tcx> AttrParser<'tcx> {
                 self.hir_id,
                 attr.span,
                 "invalid klint attribute",
-                |diag| diag,
+                |_| (),
             );
             return None;
         }
@@ -433,7 +441,7 @@ impl<'tcx> AttrParser<'tcx> {
                     self.hir_id,
                     item.path.segments[1].span(),
                     "unrecognized klint attribute",
-                    |diag| diag,
+                    |_| (),
                 );
                 None
             }

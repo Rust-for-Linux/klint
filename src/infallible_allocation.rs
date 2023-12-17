@@ -243,7 +243,6 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
                             }
 
                             diag.note(format!("{} may call alloc_error_handler", msg));
-                            diag
                         },
                     );
                 }
