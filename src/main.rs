@@ -39,7 +39,7 @@ use std::sync::atomic::AtomicPtr;
 use rustc_driver::Callbacks;
 use rustc_interface::interface::Config;
 use rustc_session::config::ErrorOutputType;
-use rustc_session::EarlyErrorHandler;
+use rustc_session::EarlyDiagCtxt;
 use std::sync::atomic::Ordering;
 
 #[macro_use]
@@ -98,7 +98,7 @@ impl Callbacks for MyCallbacks {
 }
 
 fn main() -> ExitCode {
-    let handler = EarlyErrorHandler::new(ErrorOutputType::default());
+    let handler = EarlyDiagCtxt::new(ErrorOutputType::default());
     rustc_driver::init_logger(&handler, rustc_log::LoggerConfig::from_env("KLINT_LOG"));
     let args: Vec<_> = std::env::args().collect();
 
