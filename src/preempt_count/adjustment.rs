@@ -28,7 +28,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     pub fn emit_with_use_site_info<G: EmissionGuarantee>(
         &self,
         mut diag: DiagnosticBuilder<'tcx, G>,
-    ) -> G {
+    ) -> G::EmitResult {
         let call_stack = self.call_stack.borrow();
 
         let mut limit = usize::MAX;
