@@ -6,8 +6,7 @@ use rustc_serialize::opaque::MemDecoder;
 use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_session::StableCrateId;
 use rustc_span::def_id::{CrateNum, DefIndex};
-use rustc_span::source_map::StableSourceFileId;
-use rustc_span::{BytePos, SourceFile, Span, SyntaxContext, DUMMY_SP};
+use rustc_span::{BytePos, SourceFile, Span, StableSourceFileId, SyntaxContext, DUMMY_SP};
 
 // This is the last available version of `MemEncoder` in rustc_serialize::opaque before its removal.
 pub struct MemEncoder {
@@ -244,7 +243,7 @@ impl<'tcx> Encodable<EncodeContext<'tcx>> for Span {
         }
 
         TAG_FULL_SPAN.encode(s);
-        StableSourceFileId::new(&pos.sf).encode(s);
+        pos.sf.stable_id.encode(s);
         pos.pos.encode(s);
         (span.hi - pos.sf.start_pos).encode(s);
     }
@@ -396,11 +395,7 @@ impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for Span {
                         None,
                     ),
                     None => {
-                        info!(
-                            "cannot load source file {:?} (crate {:?})",
-                            stable_source_file_id,
-                            decoder.tcx.crate_name(stable_source_file_id.cnum)
-                        );
+                        info!("cannot load source file {:?}", stable_source_file_id,);
                         decoder.replacement_span
                     }
                 }
