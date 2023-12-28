@@ -237,7 +237,7 @@ fn collect_items_rec<'tcx>(
     // current step of mono items collection.
     //
     // FIXME: don't rely on global state, instead bubble up errors. Note: this is very hard to do.
-    let error_count = tcx.sess.dcx().err_count();
+    let error_count = tcx.dcx().err_count();
 
     match starting_item.node {
         MonoItem::Static(def_id) => {
@@ -316,12 +316,12 @@ fn collect_items_rec<'tcx>(
 
     // Check for PMEs and emit a diagnostic if one happened. To try to show relevant edges of the
     // mono item graph.
-    if tcx.sess.dcx().err_count() > error_count
+    if tcx.dcx().err_count() > error_count
         && starting_item.node.is_generic_fn(tcx)
         && starting_item.node.is_user_defined()
     {
         let formatted_item = with_no_trimmed_paths!(starting_item.node.to_string());
-        tcx.sess.span_note(
+        tcx.dcx().span_note(
             starting_item.span,
             format!(
                 "the above error was encountered while instantiating `{}`",
@@ -420,7 +420,7 @@ fn check_recursion_limit<'tcx>(
             "reached the recursion limit while instantiating `{}`",
             shrunk
         );
-        let mut err = tcx.sess.struct_span_fatal(span, error);
+        let mut err = tcx.dcx().struct_span_fatal(span, error);
         err.span_note(def_span, format!("`{}` defined here", def_path_str));
         if let Some(path) = written_to_path {
             err.note(format!(
@@ -461,7 +461,7 @@ fn check_type_length_limit<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) {
             shrunk
         );
         let mut diag = tcx
-            .sess
+            .dcx()
             .struct_span_fatal(tcx.def_span(instance.def_id()), msg);
         if let Some(path) = written_to_path {
             diag.note(format!(

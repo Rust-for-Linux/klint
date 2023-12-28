@@ -66,7 +66,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
         if source_adjustment != target_adjustment
             || !source_expectation.contains_range(target_expectation)
         {
-            let mut diag = self.cx.tcx.sess.struct_span_err(
+            let mut diag = self.cx.tcx.dcx().struct_span_err(
                 span,
                 "casting between traits with incompatible preemption count properties",
             );
@@ -419,7 +419,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             .recursion_limit()
             .value_within_limit(self.call_stack.borrow().len())
         {
-            self.emit_with_use_site_info(self.sess.struct_fatal(format!(
+            self.emit_with_use_site_info(self.dcx().struct_fatal(format!(
                 "reached the recursion limit while checking indirect calls for `{}`",
                 PolyDisplay(&param_env.and(instance))
             )));
@@ -447,7 +447,7 @@ memoize!(
         if adj != crate::atomic_context::INDIRECT_DEFAULT.0
             || !exp.contains_range(crate::atomic_context::INDIRECT_DEFAULT.1)
         {
-            let mut diag = cx.sess.struct_warn(
+            let mut diag = cx.dcx().struct_warn(
                 "converting this function to pointer may result in preemption count rule violation",
             );
             diag.help(format!(
@@ -566,7 +566,7 @@ memoize!(
                     if adj != expected_adjustment || !exp.contains_range(expected_expectation) {
                         let diag = diag.get_or_insert_with(|| {
                             cx
-                                .sess
+                                .dcx()
                                 .struct_warn("constructing this vtable may result in preemption count rule violation")
                         });
                         diag.help(format!(
@@ -604,7 +604,7 @@ memoize!(
         let exp = cx.drop_expectation(poly_ty)?;
         if adj != expected_adjustment || !exp.contains_range(expected_expectation) {
             let diag = diag.get_or_insert_with(|| {
-                cx.sess.struct_warn(
+                cx.dcx().struct_warn(
                     "constructing this vtable may result in preemption count rule violation",
                 )
             });

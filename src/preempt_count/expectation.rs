@@ -584,7 +584,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     _ => ("call", None),
                 };
                 let span = data.terminator().source_info.span;
-                let mut diag = self.tcx.sess.struct_span_err(
+                let mut diag = self.tcx.dcx().struct_span_err(
                     span,
                     format!(
                         "this {kind} expects the preemption count to be {}",
@@ -630,7 +630,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             .recursion_limit()
             .value_within_limit(self.call_stack.borrow().len())
         {
-            self.emit_with_use_site_info(self.sess.struct_fatal(format!(
+            self.emit_with_use_site_info(self.dcx().struct_fatal(format!(
                 "reached the recursion limit while checking expectation for `{}`",
                 PolyDisplay(&param_env.and(instance))
             )));
@@ -686,7 +686,7 @@ memoize!(
                 let mut expected = box_free_exp - adj_bound;
                 expected.meet(&exp);
                 if expected.is_empty() {
-                    let mut diag = cx.sess.struct_err(format!(
+                    let mut diag = cx.dcx().struct_err(format!(
                         "freeing the box expects the preemption count to be {}",
                         box_free_exp
                     ));
@@ -770,7 +770,7 @@ memoize!(
                 let mut expected = elem_exp - last_adj_bound;
                 expected.meet(&elem_exp);
                 if expected.is_empty() {
-                    let mut diag = cx.sess.struct_err(format!(
+                    let mut diag = cx.dcx().struct_err(format!(
                         "dropping element of array expects the preemption count to be {}",
                         elem_exp
                     ));
@@ -837,7 +837,7 @@ memoize!(
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
                 (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
                 (Ok(exp), Ok(_)) => {
-                    let mut diag = cx.sess.struct_span_err(
+                    let mut diag = cx.dcx().struct_span_err(
                         ty.ty_adt_def()
                             .map(|x| cx.def_span(x.did()))
                             .unwrap_or_else(|| cx.def_span(instance.def_id())),
@@ -933,7 +933,7 @@ memoize!(
         let expectation_infer = cx.infer_expectation(param_env, instance, &mir)?;
         // Check if the inferred expectation matches the annotation.
         if !expectation_infer.contains_range(expectation) {
-            let mut diag = cx.sess.struct_span_err(
+            let mut diag = cx.dcx().struct_span_err(
                 cx.def_span(instance.def_id()),
                 format!(
                     "type annotated to have drop preemption count expectation of {}",
@@ -1053,7 +1053,7 @@ memoize!(
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
                 (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
                 (Ok(exp), Ok(_)) => {
-                    let mut diag = cx.sess.struct_span_err(
+                    let mut diag = cx.dcx().struct_span_err(
                         cx.def_span(instance.def_id()),
                         "this function is recursive but preemption count expectation is not 0..",
                     );
@@ -1169,7 +1169,7 @@ memoize!(
             let expectation_infer = cx.infer_expectation(param_env, instance, mir)?;
             // Check if the inferred expectation matches the annotation.
             if !expectation_infer.contains_range(expectation) {
-                let mut diag = cx.sess.struct_span_err(
+                let mut diag = cx.dcx().struct_span_err(
                     cx.def_span(instance.def_id()),
                     format!(
                         "function annotated to have preemption count expectation of {}",
@@ -1214,7 +1214,7 @@ memoize!(
                     .expectation
                 {
                     if !expectation.contains_range(ancestor_exp) {
-                        let mut diag = cx.sess.struct_span_err(
+                        let mut diag = cx.dcx().struct_span_err(
                             cx.def_span(instance.def_id()),
                             format!("trait method annotated to have preemption count expectation of {ancestor_exp}"),
                         );
@@ -1255,7 +1255,7 @@ memoize!(
 
             // Check using the intersection -- the FFI property is allowed to be more restrictive.
             if !expectation.contains_range(ffi_property.1) {
-                let mut diag = cx.sess.struct_span_err(
+                let mut diag = cx.dcx().struct_span_err(
                     cx.def_span(instance.def_id()),
                     format!(
                         "extern function `{}` must have preemption count expectation {}",

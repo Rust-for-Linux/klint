@@ -84,7 +84,7 @@ impl<'tcx> AttrParser<'tcx> {
         );
         Err(self
             .tcx
-            .sess
+            .dcx()
             .span_delayed_bug(span, "incorrect usage of `#[kint::preempt_count]`"))
     }
 

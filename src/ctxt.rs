@@ -249,7 +249,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         // Avoid serialising anything if there are errors (to prevent errors from being encoded
         // which can cause panic).
-        if self.sess.has_errors().is_some() {
+        if self.dcx().has_errors().is_some() {
             return;
         }
 

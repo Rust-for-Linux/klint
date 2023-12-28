@@ -12,7 +12,7 @@ use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
     fn drop_adjustment_overflow(&self, poly_ty: ParamEnvAnd<'tcx, Ty<'tcx>>) -> Result<!, Error> {
-        let diag = self.sess.struct_err(format!(
+        let diag = self.dcx().struct_err(format!(
             "preemption count overflow when trying to compute adjustment of type `{}",
             PolyDisplay(&poly_ty)
         ));
@@ -138,7 +138,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         // A catch-all error. MIR building usually should just have one `Return` terminator
         // so this usually shouldn't happen.
         let Some(return_bb) = return_bb else {
-            return self.emit_with_use_site_info(self.tcx.sess.struct_span_err(
+            return self.emit_with_use_site_info(self.tcx.dcx().struct_span_err(
                 self.tcx.def_span(instance.def_id()),
                 "cannot infer preemption count adjustment of this function",
             ));
@@ -175,7 +175,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     .span
             });
 
-        let mut diag = self.tcx.sess.struct_span_err(
+        let mut diag = self.tcx.dcx().struct_span_err(
             span,
             "cannot infer preemption count adjustment at this point",
         );
@@ -322,7 +322,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             .recursion_limit()
             .value_within_limit(self.call_stack.borrow().len())
         {
-            self.emit_with_use_site_info(self.sess.struct_fatal(format!(
+            self.emit_with_use_site_info(self.dcx().struct_fatal(format!(
                 "reached the recursion limit while checking adjustment for `{}`",
                 PolyDisplay(&param_env.and(instance))
             )));
@@ -440,7 +440,7 @@ memoize!(
             ty::Slice(elem_ty) => {
                 let elem_adj = cx.drop_adjustment(param_env.and(*elem_ty))?;
                 if elem_adj != 0 {
-                    let mut diag = cx.sess.struct_err(
+                    let mut diag = cx.dcx().struct_err(
                         "dropping element of slice causes non-zero preemption count adjustment",
                     );
                     diag.note(format!(
@@ -502,7 +502,7 @@ memoize!(
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
                 (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
                 (Ok(adj), Ok(_)) => {
-                    let mut diag = cx.sess.struct_span_err(
+                    let mut diag = cx.dcx().struct_span_err(
                         ty.ty_adt_def()
                             .map(|x| cx.def_span(x.did()))
                             .unwrap_or_else(|| cx.def_span(instance.def_id())),
@@ -594,7 +594,7 @@ memoize!(
         // Check if the inferred adjustment matches the annotation.
         if let Some(adjustment) = annotation.adjustment {
             if adjustment != adjustment_infer {
-                let mut diag = cx.sess.struct_span_err(
+                let mut diag = cx.dcx().struct_span_err(
                     cx.def_span(instance.def_id()),
                     format!(
                         "type annotated to have drop preemption count adjustment of {adjustment}"
@@ -707,7 +707,7 @@ memoize!(
                 (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
                 (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
                 (Ok(adj), Ok(_)) => {
-                    let mut diag = cx.sess.struct_span_err(
+                    let mut diag = cx.dcx().struct_span_err(
                         cx.def_span(instance.def_id()),
                         "this function is recursive but preemption count adjustment is not 0",
                     );
@@ -808,7 +808,7 @@ memoize!(
             let adjustment_infer = cx.infer_adjustment(param_env, instance, mir)?;
             // Check if the inferred adjustment matches the annotation.
             if adjustment != adjustment_infer {
-                let mut diag = cx.sess.struct_span_err(
+                let mut diag = cx.dcx().struct_span_err(
                     cx.def_span(instance.def_id()),
                     format!(
                         "function annotated to have preemption count adjustment of {adjustment}"
@@ -841,7 +841,7 @@ memoize!(
                     .adjustment
                 {
                     if adjustment != ancestor_adj {
-                        let mut diag = cx.sess.struct_span_err(
+                        let mut diag = cx.dcx().struct_span_err(
                             cx.def_span(instance.def_id()),
                             format!("trait method annotated to have preemption count adjustment of {ancestor_adj}"),
                         );
@@ -870,7 +870,7 @@ memoize!(
                 .unwrap_or(crate::atomic_context::FFI_DEF_DEFAULT);
 
             if adjustment != ffi_property.0 {
-                let mut diag = cx.tcx.sess.struct_span_err(
+                let mut diag = cx.tcx.dcx().struct_span_err(
                     cx.def_span(instance.def_id()),
                     format!(
                         "extern function `{}` must have preemption count adjustment {}",
