@@ -690,7 +690,7 @@ memoize!(
         }
 
         let mir = cx.analysis_instance_mir(instance.def);
-        let result = cx.infer_adjustment(param_env, instance, mir);
+        let mut result = cx.infer_adjustment(param_env, instance, mir);
 
         // Recursion encountered.
         if let Some(&recur) = cx
@@ -699,12 +699,23 @@ memoize!(
             .get(&poly_instance)
         {
             match (result, recur) {
-                (_, Err(Error::Error(_))) => bug!("recursive callee errors"),
+                (_, Err(Error::Error(_))) => {
+                    // This should not happen because the recursive callee should either return 0
+                    // or TooGeneric (see above).
+                    bug!("recursive callee errors");
+                }
                 // Error already reported.
                 (Err(Error::Error(_)), _) => (),
-                (Err(_), Err(_)) => (),
+                (Err(Error::TooGeneric), Err(Error::TooGeneric)) => (),
                 (Ok(a), Ok(b)) if a == b => (),
-                (Ok(_), Err(_)) => bug!("recursive callee too generic but caller is not"),
+                (Ok(_), Err(Error::TooGeneric)) => {
+                    // This can happen when the recursive call only occurs in a false, unwinding, or diverging path.
+                    // (e.g. perform a recursive call, then diverge).
+                    // In this case we still get the correct inferred value, *but* just using it
+                    // will cause discrepancy with the non-TooGeneric case. So we instead just
+                    // going to return `TooGeneric` so that it's tried later.
+                    result = Err(Error::TooGeneric);
+                }
                 (Err(_), Ok(_)) => bug!("monormorphic caller too generic"),
                 (Ok(adj), Ok(_)) => {
                     let mut diag = cx.dcx().struct_span_err(
