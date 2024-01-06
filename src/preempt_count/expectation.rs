@@ -1081,7 +1081,7 @@ memoize!(
                 "reporting preemption count for instance `{}`",
                 PolyDisplay(&poly_instance)
             ));
-            diag.set_span(cx.def_span(instance.def_id()));
+            diag.span(cx.def_span(instance.def_id()));
             if let Ok(property) = result {
                 diag.note(format!("expectation is inferred to be {}", property));
             } else {

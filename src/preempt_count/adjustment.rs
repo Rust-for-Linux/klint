@@ -56,7 +56,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             match &site.kind {
                 UseSiteKind::Call(span) => {
                     if diag.span.is_dummy() {
-                        diag.set_span(*span);
+                        diag.span(*span);
                     } else {
                         diag.span_note(*span, "which is called from here");
                         limit -= 1;
@@ -69,7 +69,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let mut multispan = MultiSpan::from_span(*drop_span);
                     multispan.push_span_label(*place_span, "value being dropped is here");
                     if diag.span.is_dummy() {
-                        diag.set_span(multispan);
+                        diag.span(multispan);
                     } else {
                         diag.span_note(multispan, "which is dropped here");
                         limit -= 1;
@@ -77,7 +77,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 }
                 UseSiteKind::PointerCoercion(span) => {
                     if diag.span.is_dummy() {
-                        diag.set_span(*span);
+                        diag.span(*span);
                     } else {
                         diag.span_note(*span, "which is used as a pointer here");
                         limit -= 1;
@@ -85,7 +85,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 }
                 UseSiteKind::Vtable(span) => {
                     if diag.span.is_dummy() {
-                        diag.set_span(*span);
+                        diag.span(*span);
                     } else {
                         diag.span_note(*span, "which is used as a vtable here");
                         limit -= 1;
@@ -746,7 +746,7 @@ memoize!(
                 "reporting preemption count for instance `{}`",
                 PolyDisplay(&poly_instance)
             ));
-            diag.set_span(cx.def_span(instance.def_id()));
+            diag.span(cx.def_span(instance.def_id()));
             if let Ok(property) = result {
                 diag.note(format!("adjustment is inferred to be {}", property));
             } else {
