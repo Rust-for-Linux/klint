@@ -1,12 +1,10 @@
 #![feature(rustc_private)]
 #![feature(lazy_cell)]
-#![feature(min_specialization)]
 #![feature(box_patterns)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(never_type)]
 #![warn(rustc::internal)]
-#![allow(rustc::potential_query_instability)]
 
 extern crate rustc_ast;
 extern crate rustc_data_structures;

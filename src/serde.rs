@@ -5,8 +5,11 @@ use rustc_middle::ty::{self, Ty, TyCtxt, TyDecoder, TyEncoder};
 use rustc_serialize::opaque::MemDecoder;
 use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_session::StableCrateId;
-use rustc_span::def_id::{CrateNum, DefIndex};
-use rustc_span::{BytePos, SourceFile, Span, StableSourceFileId, SyntaxContext, DUMMY_SP};
+use rustc_span::def_id::{CrateNum, DefId, DefIndex};
+use rustc_span::{
+    BytePos, SourceFile, Span, SpanDecoder, SpanEncoder, StableSourceFileId, Symbol, SyntaxContext,
+    DUMMY_SP,
+};
 
 // This is the last available version of `MemEncoder` in rustc_serialize::opaque before its removal.
 pub struct MemEncoder {
@@ -202,50 +205,63 @@ impl<'tcx> TyEncoder for EncodeContext<'tcx> {
     }
 }
 
-impl<'tcx> Encodable<EncodeContext<'tcx>> for CrateNum {
-    fn encode(&self, s: &mut EncodeContext<'tcx>) {
-        let id = s.tcx.stable_crate_id(*self);
-        id.encode(s);
-    }
-}
-
-impl<'tcx> Encodable<EncodeContext<'tcx>> for DefIndex {
-    fn encode(&self, s: &mut EncodeContext<'tcx>) {
-        s.emit_u32(self.as_u32());
-    }
-}
-
 const TAG_FULL_SPAN: u8 = 0;
 const TAG_PARTIAL_SPAN: u8 = 1;
 const TAG_RELATIVE_SPAN: u8 = 2;
 
-impl<'tcx> Encodable<EncodeContext<'tcx>> for Span {
-    fn encode(&self, s: &mut EncodeContext<'tcx>) {
+impl<'tcx> SpanEncoder for EncodeContext<'tcx> {
+    fn encode_crate_num(&mut self, crate_num: CrateNum) {
+        let id = self.tcx.stable_crate_id(crate_num);
+        id.encode(self);
+    }
+
+    fn encode_def_index(&mut self, def_index: DefIndex) {
+        self.emit_u32(def_index.as_u32());
+    }
+
+    fn encode_span(&mut self, span: Span) {
         // TODO: We probably should encode the hygiene context here as well, but
         // the span currently is only for error reporting, so it's not a big deal
         // to not have these.
-        let span = self.data();
+        let span = span.data();
 
         if span.is_dummy() {
-            return TAG_PARTIAL_SPAN.encode(s);
+            return TAG_PARTIAL_SPAN.encode(self);
         }
 
-        let pos = s.tcx.sess.source_map().lookup_byte_offset(span.lo);
+        let pos = self.tcx.sess.source_map().lookup_byte_offset(span.lo);
         if !pos.sf.contains(span.hi) {
-            return TAG_PARTIAL_SPAN.encode(s);
+            return TAG_PARTIAL_SPAN.encode(self);
         }
 
-        if Lrc::ptr_eq(&pos.sf, &s.relative_file) {
-            TAG_RELATIVE_SPAN.encode(s);
-            (span.lo - s.relative_file.start_pos).encode(s);
-            (span.hi - s.relative_file.start_pos).encode(s);
+        if Lrc::ptr_eq(&pos.sf, &self.relative_file) {
+            TAG_RELATIVE_SPAN.encode(self);
+            (span.lo - self.relative_file.start_pos).encode(self);
+            (span.hi - self.relative_file.start_pos).encode(self);
             return;
         }
 
-        TAG_FULL_SPAN.encode(s);
-        pos.sf.stable_id.encode(s);
-        pos.pos.encode(s);
-        (span.hi - pos.sf.start_pos).encode(s);
+        TAG_FULL_SPAN.encode(self);
+        pos.sf.stable_id.encode(self);
+        pos.pos.encode(self);
+        (span.hi - pos.sf.start_pos).encode(self);
+    }
+
+    fn encode_symbol(&mut self, symbol: Symbol) {
+        self.emit_str(symbol.as_str())
+    }
+
+    fn encode_expn_id(&mut self, _expn_id: rustc_span::ExpnId) {
+        unreachable!();
+    }
+
+    fn encode_syntax_context(&mut self, _syntax_context: SyntaxContext) {
+        unreachable!();
+    }
+
+    fn encode_def_id(&mut self, def_id: DefId) {
+        def_id.krate.encode(self);
+        def_id.index.encode(self);
     }
 }
 
@@ -360,29 +376,25 @@ impl<'a, 'tcx> TyDecoder for DecodeContext<'a, 'tcx> {
     }
 }
 
-impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for CrateNum {
-    fn decode(s: &mut DecodeContext<'a, 'tcx>) -> Self {
-        let id = StableCrateId::decode(s);
-        s.tcx.stable_crate_id_to_crate_num(id)
+impl<'a, 'tcx> SpanDecoder for DecodeContext<'a, 'tcx> {
+    fn decode_crate_num(&mut self) -> CrateNum {
+        let id = StableCrateId::decode(self);
+        self.tcx.stable_crate_id_to_crate_num(id)
     }
-}
 
-impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for DefIndex {
-    fn decode(s: &mut DecodeContext<'a, 'tcx>) -> Self {
-        Self::from_u32(s.read_u32())
+    fn decode_def_index(&mut self) -> DefIndex {
+        DefIndex::from_u32(self.read_u32())
     }
-}
 
-impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for Span {
-    fn decode(decoder: &mut DecodeContext<'a, 'tcx>) -> Span {
-        let tag = u8::decode(decoder);
+    fn decode_span(&mut self) -> Span {
+        let tag = u8::decode(self);
 
         match tag {
             TAG_FULL_SPAN => {
-                let stable_source_file_id = StableSourceFileId::decode(decoder);
-                let lo = BytePos::decode(decoder);
-                let hi = BytePos::decode(decoder);
-                match decoder
+                let stable_source_file_id = StableSourceFileId::decode(self);
+                let lo = BytePos::decode(self);
+                let hi = BytePos::decode(self);
+                match self
                     .tcx
                     .sess
                     .source_map()
@@ -395,17 +407,17 @@ impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for Span {
                         None,
                     ),
                     None => {
-                        info!("cannot load source file {:?}", stable_source_file_id,);
-                        decoder.replacement_span
+                        info!("cannot load source file {:?}", stable_source_file_id);
+                        self.replacement_span
                     }
                 }
             }
             TAG_RELATIVE_SPAN => {
-                let lo = BytePos::decode(decoder);
-                let hi = BytePos::decode(decoder);
+                let lo = BytePos::decode(self);
+                let hi = BytePos::decode(self);
                 Span::new(
-                    lo + decoder.relative_file.start_pos,
-                    hi + decoder.relative_file.start_pos,
+                    lo + self.relative_file.start_pos,
+                    hi + self.relative_file.start_pos,
                     SyntaxContext::root(),
                     None,
                 )
@@ -413,5 +425,28 @@ impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for Span {
             TAG_PARTIAL_SPAN => DUMMY_SP,
             _ => unreachable!(),
         }
+    }
+
+    fn decode_symbol(&mut self) -> Symbol {
+        Symbol::intern(self.read_str())
+    }
+
+    fn decode_expn_id(&mut self) -> rustc_span::ExpnId {
+        unreachable!();
+    }
+
+    fn decode_syntax_context(&mut self) -> SyntaxContext {
+        unreachable!();
+    }
+
+    fn decode_def_id(&mut self) -> DefId {
+        DefId {
+            krate: Decodable::decode(self),
+            index: Decodable::decode(self),
+        }
+    }
+
+    fn decode_attr_id(&mut self) -> rustc_span::AttrId {
+        unreachable!();
     }
 }
