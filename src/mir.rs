@@ -13,7 +13,7 @@ use rustc_middle::mir::{
 };
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_span::def_id::{CrateNum, DefId, DefIndex, LocalDefId};
-use rustc_span::sym;
+use rustc_span::{source_map::Spanned, sym, DUMMY_SP};
 
 use crate::ctxt::AnalysisCtxt;
 use crate::ctxt::PersistentQuery;
@@ -76,7 +76,7 @@ fn remap_mir_for_const_eval_select<'tcx>(
             {
                 let [tupled_args, called_in_const, called_at_rt]: [_; 3] =
                     std::mem::take(args).try_into().unwrap();
-                let ty = tupled_args.ty(&body.local_decls, tcx);
+                let ty = tupled_args.node.ty(&body.local_decls, tcx);
                 let fields = ty.tuple_fields();
                 let num_args = fields.len();
                 let func = if context == hir::Constness::Const {
@@ -85,7 +85,7 @@ fn remap_mir_for_const_eval_select<'tcx>(
                     called_at_rt
                 };
                 let (method, place): (fn(Place<'tcx>) -> Operand<'tcx>, Place<'tcx>) =
-                    match tupled_args {
+                    match tupled_args.node {
                         Operand::Constant(_) => {
                             // there is no good way of extracting a tuple arg from a constant (const generic stuff)
                             // so we just create a temporary and deconstruct that.
@@ -94,7 +94,7 @@ fn remap_mir_for_const_eval_select<'tcx>(
                                 source_info: SourceInfo::outermost(fn_span),
                                 kind: StatementKind::Assign(Box::new((
                                     local.into(),
-                                    Rvalue::Use(tupled_args.clone()),
+                                    Rvalue::Use(tupled_args.node.clone()),
                                 ))),
                             });
                             (Operand::Move, local.into())
@@ -112,11 +112,14 @@ fn remap_mir_for_const_eval_select<'tcx>(
                             local: place.local,
                             projection,
                         };
-                        method(place)
+                        Spanned {
+                            node: method(place),
+                            span: DUMMY_SP,
+                        }
                     })
                     .collect();
                 terminator.kind = TerminatorKind::Call {
-                    func,
+                    func: func.node,
                     args: arguments,
                     destination,
                     target,
