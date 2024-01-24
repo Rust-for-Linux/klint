@@ -1,7 +1,7 @@
 error: casting between traits with incompatible preemption count properties
-  --> $DIR/upcasting.rs:10:5
+  --> $DIR/upcasting.rs:11:5
    |
-10 |     x
+11 |     x
    |     ^
    |
    = help: adjustment of `dyn B` is 0 and expectation is 1
