@@ -174,7 +174,7 @@ impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
                         .tcx
                         .def_path_str_with_args(accessee.def_id(), accessee.args);
 
-                    cx.struct_span_lint(
+                    cx.span_lint(
                         &INFALLIBLE_ALLOCATION,
                         item.span,
                         format!(

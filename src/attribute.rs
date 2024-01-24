@@ -75,7 +75,7 @@ impl<'tcx> AttrParser<'tcx> {
         span: Span,
         decorate: impl for<'a, 'b> FnOnce(&'b mut DiagnosticBuilder<'a, ()>),
     ) -> Result<!, ErrorGuaranteed> {
-        self.tcx.struct_span_lint_hir(
+        self.tcx.node_span_lint(
             crate::INCORRECT_ATTRIBUTE,
             self.hir_id,
             span,
@@ -415,7 +415,7 @@ impl<'tcx> AttrParser<'tcx> {
             return None;
         };
         if item.path.segments.len() != 2 {
-            self.tcx.struct_span_lint_hir(
+            self.tcx.node_span_lint(
                 crate::INCORRECT_ATTRIBUTE,
                 self.hir_id,
                 attr.span,
@@ -436,7 +436,7 @@ impl<'tcx> AttrParser<'tcx> {
             }
             v if v == *crate::symbol::dump_mir => Some(KlintAttribute::DumpMir),
             _ => {
-                self.tcx.struct_span_lint_hir(
+                self.tcx.node_span_lint(
                     crate::INCORRECT_ATTRIBUTE,
                     self.hir_id,
                     item.path.segments[1].span(),
