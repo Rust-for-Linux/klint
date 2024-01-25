@@ -176,8 +176,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                             def_id,
                             args,
                             ty::ClosureKind::FnOnce,
-                        )
-                        .ok_or(Error::TooGeneric)?;
+                        );
                         self.check_fn_pointer_cast(instance, span)?;
                     }
                     _ => bug!(),
