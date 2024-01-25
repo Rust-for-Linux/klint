@@ -7,7 +7,7 @@ Lints for kernel or embedded system development.
 
 Clone the repository and run `cargo install`:
 ```console
-git clone https://github.com/nbdd0121/klint.git
+git clone https://github.com/Rust-for-Linux/klint.git
 cd klint
 cargo install --path .
 ```
