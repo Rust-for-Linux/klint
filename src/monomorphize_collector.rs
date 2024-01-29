@@ -26,7 +26,7 @@ use rustc_middle::{middle::codegen_fn_attrs::CodegenFnAttrFlags, mir::visit::TyC
 use rustc_session::config::EntryFnType;
 use rustc_session::Limit;
 use rustc_span::source_map::{dummy_spanned, respan, Spanned};
-use rustc_span::{Span, DUMMY_SP};
+use rustc_span::{ErrorGuaranteed, Span, DUMMY_SP};
 use rustc_trait_selection::traits;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -37,7 +37,7 @@ fn custom_coerce_unsize_info<'tcx>(
     param_env: ty::ParamEnv<'tcx>,
     source_ty: Ty<'tcx>,
     target_ty: Ty<'tcx>,
-) -> CustomCoerceUnsized {
+) -> Result<CustomCoerceUnsized, ErrorGuaranteed> {
     let trait_ref = ty::TraitRef::from_lang_item(
         tcx.tcx,
         LangItem::CoerceUnsized,
@@ -49,7 +49,7 @@ fn custom_coerce_unsize_info<'tcx>(
         Ok(traits::ImplSource::UserDefined(traits::ImplSourceUserDefinedData {
             impl_def_id,
             ..
-        })) => tcx.coerce_unsized_info(impl_def_id).custom_kind.unwrap(),
+        })) => Ok(tcx.coerce_unsized_info(impl_def_id)?.custom_kind.unwrap()),
         impl_source => {
             bug!("invalid `CoerceUnsized` impl_source: {:?}", impl_source);
         }
@@ -867,7 +867,13 @@ pub fn find_vtable_types_for_unsizing<'tcx>(
             assert_eq!(source_adt_def, target_adt_def);
 
             let CustomCoerceUnsized::Struct(coerce_index) =
-                custom_coerce_unsize_info(tcx, param_env, source_ty, target_ty);
+                match custom_coerce_unsize_info(tcx, param_env, source_ty, target_ty) {
+                    Ok(ccu) => ccu,
+                    Err(e) => {
+                        let e = Ty::new_error(tcx.tcx, e);
+                        return (e, e);
+                    }
+                };
 
             let source_fields = &source_adt_def.non_enum_variant().fields;
             let target_fields = &target_adt_def.non_enum_variant().fields;
