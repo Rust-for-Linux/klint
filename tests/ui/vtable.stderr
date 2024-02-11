@@ -9,6 +9,7 @@ warning: constructing this vtable may result in preemption count rule violation
    = help: while the expected adjustment for vtable is 0 and the expectation is 0
 
 WARN klint::ctxt no klint metadata found for crate alloc
+WARN klint::ctxt no klint metadata found for crate core
 warning: constructing this vtable may result in preemption count rule violation
   --> $DIR/vtable.rs:50:32
    |
