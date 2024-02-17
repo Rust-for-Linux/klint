@@ -502,7 +502,7 @@ memoize!(
                     .predicates
                     .into_iter()
                     .filter_map(|(pred, _)| {
-                        pred.subst_supertrait(cx.tcx, &trait_ref).as_trait_clause()
+                        pred.instantiate_supertrait(cx.tcx, &trait_ref).as_trait_clause()
                     });
                 for supertrait in super_traits {
                     if visited.insert(supertrait.to_predicate(cx.tcx)) {
