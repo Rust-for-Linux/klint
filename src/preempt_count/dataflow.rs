@@ -3,7 +3,7 @@ use rustc_middle::ty::{self, Instance, ParamEnv};
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_mir_dataflow::{fmt::DebugWithContext, Analysis, AnalysisDomain};
 
-use super::*;
+use super::{Error, UseSite, UseSiteKind};
 use crate::ctxt::AnalysisCtxt;
 
 /// Bounds of adjustments.

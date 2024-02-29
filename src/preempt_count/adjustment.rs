@@ -1,4 +1,4 @@
-use rustc_errors::{DiagnosticBuilder, EmissionGuarantee, MultiSpan};
+use rustc_errors::{Diag, EmissionGuarantee, ErrorGuaranteed, MultiSpan};
 use rustc_hir::def_id::{CrateNum, DefId};
 use rustc_hir::LangItem;
 use rustc_middle::mir::{Body, TerminatorKind, UnwindAction};
@@ -7,7 +7,7 @@ use rustc_mir_dataflow::Analysis;
 use rustc_mir_dataflow::JoinSemiLattice;
 
 use super::dataflow::{AdjustmentBoundsOrError, AdjustmentComputation};
-use super::*;
+use super::{Error, PolyDisplay, UseSiteKind};
 use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
@@ -27,7 +27,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
     pub fn emit_with_use_site_info<G: EmissionGuarantee>(
         &self,
-        mut diag: DiagnosticBuilder<'tcx, G>,
+        mut diag: Diag<'tcx, G>,
     ) -> G::EmitResult {
         let call_stack = self.call_stack.borrow();
 

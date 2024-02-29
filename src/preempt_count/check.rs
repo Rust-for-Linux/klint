@@ -1,5 +1,3 @@
-use super::*;
-use crate::ctxt::AnalysisCtxt;
 use rustc_hir::def_id::DefId;
 use rustc_hir::LangItem;
 use rustc_infer::traits::util::PredicateSet;
@@ -10,6 +8,10 @@ use rustc_middle::ty::{
     self, GenericArgs, GenericParamDefKind, Instance, ParamEnv, ParamEnvAnd, ToPredicate, Ty,
     TyCtxt, TypeFoldable, TypeVisitableExt,
 };
+use rustc_span::Span;
+
+use super::{Error, PolyDisplay, UseSite, UseSiteKind};
+use crate::ctxt::AnalysisCtxt;
 
 struct MirNeighborVisitor<'mir, 'tcx, 'cx> {
     cx: &'cx AnalysisCtxt<'tcx>,
@@ -502,7 +504,8 @@ memoize!(
                     .predicates
                     .into_iter()
                     .filter_map(|(pred, _)| {
-                        pred.instantiate_supertrait(cx.tcx, &trait_ref).as_trait_clause()
+                        pred.instantiate_supertrait(cx.tcx, &trait_ref)
+                            .as_trait_clause()
                     });
                 for supertrait in super_traits {
                     if visited.insert(supertrait.to_predicate(cx.tcx)) {

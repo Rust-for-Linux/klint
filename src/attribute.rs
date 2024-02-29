@@ -1,7 +1,7 @@
 use rustc_ast::tokenstream::{self, TokenTree};
 use rustc_ast::{ast, token};
 use rustc_data_structures::sync::Lrc;
-use rustc_errors::{DiagnosticBuilder, ErrorGuaranteed};
+use rustc_errors::{Diag, ErrorGuaranteed};
 use rustc_hir::HirId;
 use rustc_middle::ty::TyCtxt;
 use rustc_span::symbol::Ident;
@@ -73,7 +73,7 @@ impl<'tcx> AttrParser<'tcx> {
     fn error(
         &self,
         span: Span,
-        decorate: impl for<'a, 'b> FnOnce(&'b mut DiagnosticBuilder<'a, ()>),
+        decorate: impl for<'a, 'b> FnOnce(&'b mut Diag<'a, ()>),
     ) -> Result<!, ErrorGuaranteed> {
         self.tcx.node_span_lint(
             crate::INCORRECT_ATTRIBUTE,

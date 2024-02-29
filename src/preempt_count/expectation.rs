@@ -8,7 +8,7 @@ use rustc_mir_dataflow::Analysis;
 use rustc_span::DUMMY_SP;
 
 use super::dataflow::AdjustmentComputation;
-use super::*;
+use super::{AdjustmentBounds, Error, ExpectationRange, PolyDisplay, UseSite, UseSiteKind};
 use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
@@ -80,7 +80,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         body: &Body<'tcx>,
         expected: ExpectationRange,
         span: Option<MultiSpan>,
-        diag: &mut rustc_errors::DiagnosticBuilder<'_, G>,
+        diag: &mut rustc_errors::Diag<'_, G>,
     ) -> Result<(), Error> {
         let mut analysis_result = AdjustmentComputation {
             checker: self,
@@ -253,7 +253,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         instance: Instance<'tcx>,
         expected: ExpectationRange,
         span: MultiSpan,
-        diag: &mut rustc_errors::DiagnosticBuilder<'_, G>,
+        diag: &mut rustc_errors::Diag<'_, G>,
     ) -> Result<(), Error> {
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
@@ -336,7 +336,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         ty: Ty<'tcx>,
         expected: ExpectationRange,
         span: MultiSpan,
-        diag: &mut rustc_errors::DiagnosticBuilder<'_, G>,
+        diag: &mut rustc_errors::Diag<'_, G>,
     ) -> Result<(), Error> {
         // If the type doesn't need drop, then there is trivially no expectation.
         assert!(ty.needs_drop(self.tcx, param_env));
