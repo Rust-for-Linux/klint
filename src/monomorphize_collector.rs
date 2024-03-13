@@ -776,7 +776,7 @@ pub fn should_codegen_locally<'tcx>(tcx: TyCtxt<'tcx>, instance: &Instance<'tcx>
         return false;
     }
 
-    if let DefKind::Static(_) = tcx.def_kind(def_id) {
+    if let DefKind::Static { .. } = tcx.def_kind(def_id) {
         // We cannot monomorphize statics from upstream crates.
         return false;
     }
@@ -982,7 +982,7 @@ impl<'v> RootCollector<'_, 'v> {
                 );
                 self.output.push(dummy_spanned(MonoItem::GlobalAsm(id)));
             }
-            DefKind::Static(..) => {
+            DefKind::Static { .. } => {
                 debug!(
                     "RootCollector: ItemKind::Static({})",
                     self.tcx.def_path_str(id.owner_id.to_def_id())

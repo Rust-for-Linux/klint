@@ -186,7 +186,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 let def_kind = self.def_kind(did);
                 match def_kind {
                     DefKind::Const
-                    | DefKind::Static(..)
+                    | DefKind::Static { .. }
                     | DefKind::AssocConst
                     | DefKind::Ctor(..)
                     | DefKind::AnonConst
