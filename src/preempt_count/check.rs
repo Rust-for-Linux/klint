@@ -357,7 +357,7 @@ impl<'mir, 'tcx, 'cx> MirVisitor<'tcx> for MirNeighborVisitor<'mir, 'tcx, 'cx> {
 
         let const_ = self.monomorphize(constant.const_);
         let param_env = ty::ParamEnv::reveal_all();
-        let val = match const_.eval(self.cx.tcx, param_env, None) {
+        let val = match const_.eval(self.cx.tcx, param_env, constant.span) {
             Ok(v) => v,
             Err(ErrorHandled::Reported(..)) => return,
             Err(ErrorHandled::TooGeneric(..)) => {
