@@ -3,5 +3,5 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 
 [toolchain]
-channel = "nightly"
+channel = "1.83"
 components = ["llvm-tools-preview", "rustc-dev", "rust-src"]
