@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 pub mod drop_shim;
+pub mod elaborate_drop;
+pub mod patch;
 
 use std::sync::atomic::AtomicPtr;
 use std::sync::atomic::Ordering;

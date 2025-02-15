@@ -8,12 +8,13 @@
 use rustc_abi::{FieldIdx, VariantIdx};
 use rustc_hir::def_id::DefId;
 use rustc_index::{Idx, IndexVec};
-use rustc_middle::mir::patch::MirPatch;
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, EarlyBinder, Ty, TyCtxt, TypingEnv};
-use rustc_mir_dataflow::elaborate_drops::{self, *};
 use rustc_span::Span;
 use std::{fmt, iter};
+
+use super::elaborate_drop::{self, *};
+use super::patch::MirPatch;
 
 use crate::ctxt::AnalysisCtxt;
 
@@ -87,13 +88,13 @@ pub fn build_drop_shim<'tcx>(
         };
         let dropee = cx.mk_place_deref(dropee_ptr);
         let resume_block = elaborator.patch.resume_block();
-        elaborate_drops::elaborate_drop(
+        elaborate_drop::elaborate_drop(
             &mut elaborator,
             source_info,
             dropee,
             (),
             return_block,
-            elaborate_drops::Unwind::To(resume_block),
+            elaborate_drop::Unwind::To(resume_block),
             START_BLOCK,
         );
         elaborator.patch
