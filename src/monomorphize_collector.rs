@@ -128,7 +128,7 @@ pub fn collect_crate_mono_items(
             let mut recursion_depths = DefIdMap::default();
             let should_gen = match root {
                 MonoItem::Static(def_id) => {
-                    let instance = Instance::mono(tcx, def_id);
+                    let instance = Instance::mono(tcx, *def_id);
                     should_codegen_locally(tcx, &instance)
                 }
                 MonoItem::Fn(instance) => should_codegen_locally(tcx, &instance),
@@ -137,7 +137,7 @@ pub fn collect_crate_mono_items(
             if should_gen {
                 collect_items_rec(
                     tcx,
-                    dummy_spanned(root),
+                    dummy_spanned(*root),
                     &visited,
                     &mut recursion_depths,
                     recursion_limit,
@@ -379,7 +379,7 @@ fn shrunk_instance_name<'tcx>(
 
         let path = tcx
             .output_filenames(())
-            .temp_path_ext("long-type.txt", None);
+            .temp_path_ext_for_cgu("txt", "long-type", None);
         let written_to_path = std::fs::write(&path, s).ok().map(|_| path);
 
         (shrunk, written_to_path)
@@ -740,14 +740,14 @@ fn visit_instance_use<'tcx>(
         ty::InstanceKind::ThreadLocalShim(..) => {
             bug!("{:?} being reified", instance);
         }
-        ty::InstanceKind::DropGlue(_, None) | ty::InstanceKind::AsyncDropGlueCtorShim(_, None) => {
+        ty::InstanceKind::DropGlue(_, None) => {
             // Don't need to emit noop drop glue if we are calling directly.
             if !is_direct_call {
                 output.push(create_fn_mono_item(tcx, instance, source));
             }
         }
         ty::InstanceKind::DropGlue(_, Some(_))
-        | ty::InstanceKind::AsyncDropGlueCtorShim(_, Some(_))
+        | ty::InstanceKind::AsyncDropGlueCtorShim(_, _)
         | ty::InstanceKind::VTableShim(..)
         | ty::InstanceKind::ReifyShim(..)
         | ty::InstanceKind::ClosureOnceShim { .. }
@@ -755,7 +755,9 @@ fn visit_instance_use<'tcx>(
         | ty::InstanceKind::Item(..)
         | ty::InstanceKind::FnPtrShim(..)
         | ty::InstanceKind::CloneShim(..)
-        | ty::InstanceKind::FnPtrAddrShim(..) => {
+        | ty::InstanceKind::FnPtrAddrShim(..)
+        | ty::InstanceKind::FutureDropPollShim(..)
+        | ty::InstanceKind::AsyncDropGlue(..) => {
             output.push(create_fn_mono_item(tcx, instance, source));
         }
     }
@@ -980,7 +982,7 @@ impl<'v> RootCollector<'_, 'v> {
                     debug!("RootCollector: ADT drop-glue for {id:?}",);
 
                     let item = self.tcx.hir_item(id);
-                    let ty = Instance::new(item.owner_id.to_def_id(), GenericArgs::empty())
+                    let ty = Instance::new_raw(item.owner_id.to_def_id(), GenericArgs::empty())
                         .ty(self.tcx, ty::TypingEnv::fully_monomorphized());
                     visit_drop_use(self.tcx, ty, true, DUMMY_SP, self.output);
                 }

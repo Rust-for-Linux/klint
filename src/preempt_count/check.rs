@@ -794,7 +794,7 @@ memoize!(
             let poly_args =
                 cx.erase_regions(GenericArgs::identity_for_item(cx.tcx, instance.def_id()));
             let poly_poly_instance =
-                poly_typing_env.as_query_input(Instance::new(instance.def_id(), poly_args));
+                poly_typing_env.as_query_input(Instance::new_raw(instance.def_id(), poly_args));
             let generic = poly_poly_instance == poly_instance;
             if !generic {
                 match cx.instance_check(poly_poly_instance) {

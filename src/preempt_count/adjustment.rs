@@ -32,7 +32,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     fn poly_instance_of_def_id(&self, def_id: DefId) -> PseudoCanonicalInput<'tcx, Instance<'tcx>> {
         let poly_typing_env = TypingEnv::post_analysis(self.tcx, def_id);
         let poly_args = self.erase_regions(GenericArgs::identity_for_item(self.tcx, def_id));
-        poly_typing_env.as_query_input(Instance::new(def_id, poly_args))
+        poly_typing_env.as_query_input(Instance::new_raw(def_id, poly_args))
     }
 
     pub fn emit_with_use_site_info<G: EmissionGuarantee>(
@@ -298,11 +298,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
         let mut adjustment = AdjustmentBoundsOrError::default();
         for (b, data) in rustc_middle::mir::traversal::reachable(body) {
-            match data.terminator().kind {
-                TerminatorKind::Return => {
-                    adjustment.join(&analysis_result.results().entry_set_for_block(b));
-                }
-                _ => (),
+            if data.terminator().kind == TerminatorKind::Return {
+                analysis_result.seek_to_block_start(b);
+                adjustment.join(analysis_result.get());
             }
         }
         let adjustment = adjustment.into_result()?;
@@ -671,7 +669,7 @@ memoize!(
             let poly_args =
                 cx.erase_regions(GenericArgs::identity_for_item(cx.tcx, instance.def_id()));
             let poly_poly_instance =
-                poly_typing_env.as_query_input(Instance::new(instance.def_id(), poly_args));
+                poly_typing_env.as_query_input(Instance::new_raw(instance.def_id(), poly_args));
             generic = poly_poly_instance == poly_instance;
             if !generic {
                 match cx.instance_adjustment(poly_poly_instance) {
@@ -830,7 +828,7 @@ memoize!(
             let poly_args =
                 cx.erase_regions(GenericArgs::identity_for_item(cx.tcx, instance.def_id()));
             let poly_poly_instance =
-                poly_typing_env.as_query_input(Instance::new(instance.def_id(), poly_args));
+                poly_typing_env.as_query_input(Instance::new_raw(instance.def_id(), poly_args));
             let generic = poly_poly_instance == poly_instance;
             if !generic {
                 match cx.instance_adjustment_check(poly_poly_instance) {

@@ -40,11 +40,11 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             if let Some(adt_def) = self_ty.skip_binder().ty_adt_def()
                 && let data = self.def_path(adt_def.did()).data
                 && data.len() == 3
-                && let DefPathData::TypeNs(Some(task)) = data[0].data
+                && let DefPathData::TypeNs(task) = data[0].data
                 && task == *crate::symbol::task
-                && let DefPathData::TypeNs(Some(wake)) = data[1].data
+                && let DefPathData::TypeNs(wake) = data[1].data
                 && wake == *crate::symbol::wake
-                && let DefPathData::TypeNs(Some(waker)) = data[2].data
+                && let DefPathData::TypeNs(waker) = data[2].data
                 && waker == *crate::symbol::Waker
             {
                 if fn_name == sym::clone
@@ -65,9 +65,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         let data = self.def_path(def_id).data;
 
         if data.len() == 3
-            && let DefPathData::TypeNs(Some(any)) = data[0].data
+            && let DefPathData::TypeNs(any) = data[0].data
             && any == sym::any
-            && let DefPathData::TypeNs(Some(any_trait)) = data[1].data
+            && let DefPathData::TypeNs(any_trait) = data[1].data
             && any_trait == sym::Any
             && let DefPathData::ValueNs(_any_fn) = data[2].data
         {
@@ -80,9 +80,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         }
 
         if data.len() == 3
-            && let DefPathData::TypeNs(Some(error)) = data[0].data
+            && let DefPathData::TypeNs(error) = data[0].data
             && error == *crate::symbol::error
-            && let DefPathData::TypeNs(Some(error_trait)) = data[1].data
+            && let DefPathData::TypeNs(error_trait) = data[1].data
             && error_trait == sym::Error
             && let DefPathData::ValueNs(_any_fn) = data[2].data
         {
@@ -95,7 +95,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         }
 
         if data.len() == 3
-            && let DefPathData::TypeNs(Some(fmt)) = data[0].data
+            && let DefPathData::TypeNs(fmt) = data[0].data
             && fmt == sym::fmt
             && let DefPathData::TypeNs(_fmt_trait) = data[1].data
             && let DefPathData::ValueNs(fmt_fn) = data[2].data
@@ -109,9 +109,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             };
         }
         if data.len() == 3
-            && let DefPathData::TypeNs(Some(fmt)) = data[0].data
+            && let DefPathData::TypeNs(fmt) = data[0].data
             && fmt == sym::fmt
-            && let DefPathData::TypeNs(Some(write)) = data[1].data
+            && let DefPathData::TypeNs(write) = data[1].data
             && write == *crate::symbol::Write
             && let DefPathData::ValueNs(_write_fn) = data[2].data
         {
@@ -123,7 +123,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             };
         }
         if data.len() == 2
-            && let DefPathData::TypeNs(Some(fmt)) = data[0].data
+            && let DefPathData::TypeNs(fmt) = data[0].data
             && fmt == sym::fmt
             && let DefPathData::ValueNs(write) = data[1].data
             && write == *crate::symbol::write

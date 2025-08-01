@@ -23,8 +23,8 @@ fn run_ui_tests(bless: bool) {
         ..Default::default()
     };
 
-    config.target_rustcflags = Some(format!(
-        "-Zcrate-attr=feature(register_tool) -Zcrate-attr=register_tool(klint)"
+    config.target_rustcflags = Some(String::from(
+        "-Zcrate-attr=feature(register_tool) -Zcrate-attr=register_tool(klint)",
     ));
 
     config.src_base = "tests/ui".into();
@@ -37,6 +37,6 @@ fn run_ui_tests(bless: bool) {
 
 #[test]
 fn compile_test() {
-    let bless = env::var("BLESS").map_or(false, |x| !x.trim().is_empty());
+    let bless = env::var("BLESS").is_ok_and(|x| !x.trim().is_empty());
     run_ui_tests(bless);
 }
