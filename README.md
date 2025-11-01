@@ -22,7 +22,7 @@ Note that klint currently is pinned to a Rust version so it is likely that runni
 
 To run this tool, use rustup which will prepare the necessary environment variables:
 ```
-rustup run beta klint
+rustup run 1.91 klint
 ```
 
 klint is developed against latest nightly rustc; if you would like to use it with a stable Rust version, check the tagged releases.
