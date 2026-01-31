@@ -121,12 +121,17 @@ impl Callbacks for MyCallbacks {
                 atomic_context::ATOMIC_CONTEXT,
                 binary_analysis::stack_size::STACK_FRAME_TOO_LARGE,
                 hir_lints::not_using_prelude::NOT_USING_PRELUDE,
+                hir_lints::pr_missing_newline::PR_MISSING_NEWLINE,
             ]);
 
             lint_store.register_late_pass(|tcx| {
                 Box::new(hir_lints::not_using_prelude::NotUsingPrelude {
                     cx: driver::cx::<MyCallbacks>(tcx),
                 })
+            });
+
+            lint_store.register_early_pass(|| {
+                Box::new(hir_lints::pr_missing_newline::PrMissingNewline)
             });
 
             // lint_store

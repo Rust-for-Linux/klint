@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 default-run = "klint"
 
 [dependencies]
-rusqlite = "0.37"
+rusqlite = { version = "0.37", features = ["bundled"] }
 home = "0.5"
 object = "0.38.0"
 gimli = "0.32.3"
