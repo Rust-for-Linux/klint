@@ -15,6 +15,8 @@
 #![feature(unsize)]
 #![warn(rustc::internal)]
 
+#![allow(rustc::implicit_sysroot_crate_import)]
+
 #[macro_use]
 extern crate rustc_macros;
 #[macro_use]

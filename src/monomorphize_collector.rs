@@ -131,6 +131,7 @@ impl<'tcx> UsageMap<'tcx> {
     }
 
     // Internally iterate over all items and the things each accesses.
+    #[allow(rustc::potential_query_instability)]
     pub fn for_each_item_and_its_used_items<F>(&self, mut f: F)
     where
         F: FnMut(MonoItem<'tcx>, &[Spanned<MonoItem<'tcx>>]),

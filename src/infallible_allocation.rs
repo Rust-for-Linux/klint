@@ -25,6 +25,7 @@ fn is_generic_fn<'tcx>(instance: Instance<'tcx>) -> bool {
 }
 
 impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
+    #[allow(rustc::potential_query_instability)]
     fn check_crate(&mut self, cx: &LateContext<'tcx>) {
         // Collect all mono items to be codegened with this crate. Discard the inline map, it does
         // not contain enough information for us; we will collect them ourselves later.
