@@ -55,3 +55,4 @@ If you want to check it out, you can opt into it with `-Dklint::atomic_context`.
 * [Stack frame size check](doc/stack_size.md)
 * [Prelude check](doc/not_using_prelude.md)
 * [`build_assert` not inlined](doc/build_assert_not_inlined.md)
+* [`build_assert` can be const](doc/build_assert_can_be_const.md)

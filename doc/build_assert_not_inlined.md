@@ -29,8 +29,9 @@ fn const_only_wrapper() {
 }
 ```
 
-These are the kinds of cases that should eventually prefer a separate const-only lint suggesting
-`const { assert!(...) }`.
+These cases are covered by the separate
+[`build_assert_can_be_const`](build_assert_can_be_const.md) lint, which suggests replacing
+`build_assert!` with `const { assert!(...) }`.
 
 ## Runtime-dependent parameter flow
 
