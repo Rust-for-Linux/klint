@@ -2,14 +2,14 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use rustc_data_structures::fx::{FxHashMap, FxHashSet};
+use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::{Diag, DiagCtxtHandle, Diagnostic, Level};
 use rustc_lint::{LateContext, LateLintPass, LintContext};
-use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::ty::Instance;
 use rustc_session::{declare_lint_pass, declare_tool_lint};
-use rustc_span::{Spanned, sym};
+use rustc_span::sym;
 
+use crate::mono_graph::collect_instance_use_graph;
 use crate::monomorphize_collector::MonoItemCollectionStrategy;
 
 declare_tool_lint! {
@@ -36,57 +36,9 @@ fn is_generic_fn<'tcx>(instance: Instance<'tcx>) -> bool {
 
 impl<'tcx> LateLintPass<'tcx> for InfallibleAllocation {
     fn check_crate(&mut self, cx: &LateContext<'tcx>) {
-        // Collect all mono items to be codegened with this crate. Discard the inline map, it does
-        // not contain enough information for us; we will collect them ourselves later.
-        //
-        // Use eager mode here so dead code is also linted on.
-        let access_map = super::monomorphize_collector::collect_crate_mono_items(
-            cx.tcx,
-            MonoItemCollectionStrategy::Eager,
-        )
-        .1;
-
-        // Build a forward and backward dependency graph with span information.
-        let mut forward = FxHashMap::default();
-        let mut backward = FxHashMap::<_, Vec<_>>::default();
-
-        access_map.for_each_item_and_its_used_items(|accessor, accessees| {
-            let accessor = match accessor {
-                MonoItem::Static(s) => Instance::mono(cx.tcx, s),
-                MonoItem::Fn(v) => v,
-                _ => return,
-            };
-
-            let fwd_list = forward
-                .entry(accessor)
-                .or_insert_with(|| Vec::with_capacity(accessees.len()));
-            let mut def_span = None;
-
-            for accessee in accessees {
-                let accessee_node = match accessee.node {
-                    MonoItem::Static(s) => Instance::mono(cx.tcx, s),
-                    MonoItem::Fn(v) => v,
-                    _ => return,
-                };
-
-                // For const-evaluated items, they're collected from CTFE alloc, which does not have span
-                // information. Synthesize one with the accessor.
-                let span = if accessee.span.is_dummy() {
-                    *def_span.get_or_insert_with(|| cx.tcx.def_span(accessor.def_id()))
-                } else {
-                    accessee.span
-                };
-
-                fwd_list.push(Spanned {
-                    node: accessee_node,
-                    span,
-                });
-                backward.entry(accessee_node).or_default().push(Spanned {
-                    node: accessor,
-                    span,
-                });
-            }
-        });
+        let graph = collect_instance_use_graph(cx.tcx, MonoItemCollectionStrategy::Eager);
+        let forward = &graph.forward;
+        let backward = &graph.backward;
 
         // Find all fallible functions
         let mut visited = FxHashSet::default();

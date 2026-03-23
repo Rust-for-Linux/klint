@@ -66,6 +66,7 @@ mod hir_lints;
 mod infallible_allocation;
 mod lattice;
 mod mir;
+mod mono_graph;
 mod monomorphize_collector;
 mod preempt_count;
 mod serde;
