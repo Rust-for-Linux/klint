@@ -1,0 +1,97 @@
+error: this `build_assert!` does not depend on runtime values; prefer `const { assert!(...) }` instead
+  --> $DIR/build_assert_can_be_const.rs:34:5
+   |
+34 |     build_assert!(1 < LIMIT);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this assertion is already effectively constant, so it does not need `build_assert!` to optimize away an error path
+  --> $DIR/build_assert_can_be_const.rs:34:5
+   |
+34 |     build_assert!(1 < LIMIT);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+note: the lint level is defined here
+  --> $DIR/build_assert_can_be_const.rs:2:9
+   |
+ 2 | #![deny(klint::build_assert_can_be_const)]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: this `build_assert!` does not depend on runtime values; prefer `const { assert!(...) }` instead
+  --> $DIR/build_assert_can_be_const.rs:38:5
+   |
+38 |     build_assert!(OFFSET < N, "offset must stay in bounds");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this assertion is already effectively constant, so it does not need `build_assert!` to optimize away an error path
+  --> $DIR/build_assert_can_be_const.rs:38:5
+   |
+38 |     build_assert!(OFFSET < N, "offset must stay in bounds");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: this `build_assert!` does not depend on runtime values; prefer `const { assert!(...) }` instead
+  --> $DIR/build_assert_can_be_const.rs:42:5
+   |
+42 |     forward_build_assert!(OFFSET < LIMIT);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this assertion is already effectively constant, so it does not need `build_assert!` to optimize away an error path
+  --> $DIR/build_assert_can_be_const.rs:42:5
+   |
+42 |     forward_build_assert!(OFFSET < LIMIT);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: this `build_assert!` does not depend on runtime values; prefer `const { assert!(...) }` instead
+  --> $DIR/build_assert_can_be_const.rs:50:5
+   |
+50 |     build_assert!(helper::<N>() < N);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this assertion is already effectively constant, so it does not need `build_assert!` to optimize away an error path
+  --> $DIR/build_assert_can_be_const.rs:50:5
+   |
+50 |     build_assert!(helper::<N>() < N);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: this `build_assert!` does not depend on runtime values; prefer `const { assert!(...) }` instead
+  --> $DIR/build_assert_can_be_const.rs:54:5
+   |
+54 | /     build_assert!(match LIMIT {
+55 | |         4 => true,
+56 | |         _ => false,
+57 | |     });
+   | |______^
+   |
+note: this assertion is already effectively constant, so it does not need `build_assert!` to optimize away an error path
+  --> $DIR/build_assert_can_be_const.rs:54:5
+   |
+54 | /     build_assert!(match LIMIT {
+55 | |         4 => true,
+56 | |         _ => false,
+57 | |     });
+   | |______^
+
+error: this `build_assert!` does not depend on runtime values; prefer `const { assert!(...) }` instead
+  --> $DIR/build_assert_can_be_const.rs:61:5
+   |
+61 |     build_assert!(1 /* , */ < LIMIT);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this assertion is already effectively constant, so it does not need `build_assert!` to optimize away an error path
+  --> $DIR/build_assert_can_be_const.rs:61:5
+   |
+61 |     build_assert!(1 /* , */ < LIMIT);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: this `build_assert!` does not depend on runtime values; prefer `const { assert!(...) }` instead
+  --> $DIR/build_assert_can_be_const.rs:65:5
+   |
+65 |     build_assert!(1 /* , */ < LIMIT, "still const");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this assertion is already effectively constant, so it does not need `build_assert!` to optimize away an error path
+  --> $DIR/build_assert_can_be_const.rs:65:5
+   |
+65 |     build_assert!(1 /* , */ < LIMIT, "still const");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: aborting due to 7 previous errors
+
