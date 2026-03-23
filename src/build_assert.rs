@@ -11,6 +11,7 @@ use rustc_middle::ty::{TyCtxt, TypeckResults};
 use rustc_session::impl_lint_pass;
 use rustc_span::Span;
 
+use crate::build_assert_can_be_const::{BUILD_ASSERT_CAN_BE_CONST, emit_build_assert_can_be_const};
 use crate::build_assert_not_inlined::{
     BUILD_ASSERT_NOT_INLINED, emit_build_assert_not_inlined, has_inline_always,
 };
@@ -84,6 +85,7 @@ pub(crate) struct RequirementSummary {
 pub(crate) struct FunctionSummary {
     pub(crate) requirement: RequirementSummary,
     return_dependency: ExprDependency,
+    pub(crate) const_only_build_asserts: Vec<Span>,
 }
 
 impl RequirementSummary {
@@ -127,6 +129,12 @@ impl RequirementSummary {
                 self.origin.get_or_insert(origin);
             }
         }
+    }
+}
+
+impl FunctionSummary {
+    fn record_const_only_build_assert(&mut self, span: Span) {
+        self.const_only_build_asserts.push(span);
     }
 }
 
@@ -854,7 +862,9 @@ impl<'tcx> hir_visit::Visitor<'tcx> for SummaryAnalyzer<'_, 'tcx> {
             && self.state.seen_build_assert_callsites.insert(call_site)
         {
             let dependency = self.expr_dependency(expr);
-            if !matches!(dependency, ExprDependency::Constant) {
+            if matches!(dependency, ExprDependency::Constant) {
+                self.state.summary.record_const_only_build_assert(call_site);
+            } else {
                 self.state
                     .summary
                     .requirement
@@ -981,14 +991,14 @@ fn compute_summaries<'tcx>(
     summaries
 }
 
-pub struct BuildAssertNotInlined<'tcx> {
+pub struct BuildAssertLints<'tcx> {
     pub cx: &'tcx AnalysisCtxt<'tcx>,
     pub bodies: FxHashMap<LocalDefId, &'tcx Body<'tcx>>,
 }
 
-impl_lint_pass!(BuildAssertNotInlined<'_> => [BUILD_ASSERT_NOT_INLINED]);
+impl_lint_pass!(BuildAssertLints<'_> => [BUILD_ASSERT_NOT_INLINED, BUILD_ASSERT_CAN_BE_CONST]);
 
-impl<'tcx> LateLintPass<'tcx> for BuildAssertNotInlined<'tcx> {
+impl<'tcx> LateLintPass<'tcx> for BuildAssertLints<'tcx> {
     fn check_fn(
         &mut self,
         _: &LateContext<'tcx>,
@@ -1023,6 +1033,10 @@ impl<'tcx> LateLintPass<'tcx> for BuildAssertNotInlined<'tcx> {
             let Some(summary) = summaries.get(&def_id) else {
                 continue;
             };
+
+            for &span in &summary.const_only_build_asserts {
+                emit_build_assert_can_be_const(cx, span);
+            }
 
             if summary.requirement.requires_inline()
                 && !has_inline_always(cx.tcx, def_id.to_def_id())

@@ -1,3 +1,4 @@
+#![allow(klint::build_assert_can_be_const)]
 #![allow(klint::build_assert_not_inlined)]
 
 unsafe extern "C" {

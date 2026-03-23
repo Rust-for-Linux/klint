@@ -1,11 +1,3 @@
-warning: unknown lint: `klint::build_assert_can_be_const`
- --> $DIR/build_assert_not_inlined.rs:1:10
-  |
-1 | #![allow(klint::build_assert_can_be_const)]
-  |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: did you mean: `klint::build_assert_not_inlined`
-  |
-  = note: `#[warn(unknown_lints)]` on by default
-
  WARN klint::atomic_context Unable to determine property for FFI function `const_only_entry`
  WARN klint::atomic_context Unable to determine property for FFI function `const_only_entry`
  WARN klint::atomic_context Unable to determine property for FFI function `runtime_entry`
@@ -192,5 +184,5 @@ note: this call passes non-static values into `runtime_direct` which must be inl
 208 |     runtime_direct(offset, LIMIT);
     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error: aborting due to 14 previous errors; 1 warning emitted
+error: aborting due to 14 previous errors
 
