@@ -9,6 +9,8 @@ use rustc_hir::{Body, Expr, HirId, QPath, Stmt, StmtKind, UnOp};
 use rustc_middle::ty::{TyCtxt, TypeckResults};
 use rustc_span::Span;
 
+use crate::mono_graph::{CallableTargets, IndirectCandidates};
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct BuildAssertCondition {
     /// Span of the original `build_assert!(...)` invocation in source.
@@ -63,9 +65,6 @@ pub(crate) enum RequirementOrigin {
     Propagated { callee: LocalDefId, call_span: Span },
 }
 
-type IndirectCallsiteMap = FxHashMap<HirId, CallableTargets>;
-type IndirectCandidates = FxHashMap<LocalDefId, IndirectCallsiteMap>;
-type CallableTargets = FxHashSet<LocalDefId>;
 type FunctionSummaries = FxHashMap<LocalDefId, FunctionSummary>;
 
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -914,7 +913,7 @@ impl<'tcx> hir_visit::Visitor<'tcx> for SummaryAnalyzer<'_, 'tcx> {
 }
 
 /// Analyze one function body against the current fixed-point summaries of its callees.
-pub(crate) fn analyze_body<'tcx>(
+fn analyze_body<'tcx>(
     tcx: TyCtxt<'tcx>,
     owner: LocalDefId,
     typeck: &TypeckResults<'tcx>,
@@ -934,4 +933,44 @@ pub(crate) fn analyze_body<'tcx>(
     );
     hir_visit::Visitor::visit_body(&mut analyzer, body);
     analyzer.finish_summary(body)
+}
+
+fn compute_summaries<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    bodies: &FxHashMap<LocalDefId, &'tcx Body<'tcx>>,
+    body_owners: &[LocalDefId],
+    build_assert: Option<DefId>,
+    indirect_candidates: &IndirectCandidates,
+) -> FunctionSummaries {
+    let mut summaries = FunctionSummaries::default();
+
+    // Iterate to a fixpoint because one local helper's summary may depend on another helper's
+    // return dependency or inline requirement.
+    loop {
+        let mut changed = false;
+
+        for &def_id in body_owners {
+            let body = bodies[&def_id];
+            let summary = analyze_body(
+                tcx,
+                def_id,
+                tcx.typeck(def_id),
+                build_assert,
+                &summaries,
+                indirect_candidates,
+                body,
+            );
+
+            if summaries.get(&def_id) != Some(&summary) {
+                summaries.insert(def_id, summary);
+                changed = true;
+            }
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    summaries
 }
