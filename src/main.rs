@@ -59,6 +59,7 @@ mod ctxt;
 mod atomic_context;
 mod attribute;
 mod binary_analysis;
+mod build_assert;
 mod diagnostic;
 mod diagnostic_items;
 mod driver;
