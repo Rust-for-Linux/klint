@@ -6,10 +6,16 @@ use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_hir::intravisit as hir_visit;
 use rustc_hir::{Body, Expr, HirId, QPath, Stmt, StmtKind, UnOp};
+use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{TyCtxt, TypeckResults};
+use rustc_session::impl_lint_pass;
 use rustc_span::Span;
 
-use crate::mono_graph::{CallableTargets, IndirectCandidates};
+use crate::build_assert_not_inlined::{
+    BUILD_ASSERT_NOT_INLINED, emit_build_assert_not_inlined, has_inline_always,
+};
+use crate::ctxt::AnalysisCtxt;
+use crate::mono_graph::{CallableTargets, IndirectCandidates, collect_indirect_candidates};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct BuildAssertCondition {
@@ -973,4 +979,56 @@ fn compute_summaries<'tcx>(
     }
 
     summaries
+}
+
+pub struct BuildAssertNotInlined<'tcx> {
+    pub cx: &'tcx AnalysisCtxt<'tcx>,
+    pub bodies: FxHashMap<LocalDefId, &'tcx Body<'tcx>>,
+}
+
+impl_lint_pass!(BuildAssertNotInlined<'_> => [BUILD_ASSERT_NOT_INLINED]);
+
+impl<'tcx> LateLintPass<'tcx> for BuildAssertNotInlined<'tcx> {
+    fn check_fn(
+        &mut self,
+        _: &LateContext<'tcx>,
+        _: hir_visit::FnKind<'tcx>,
+        _: &'tcx rustc_hir::FnDecl<'tcx>,
+        body: &'tcx Body<'tcx>,
+        _: Span,
+        def_id: LocalDefId,
+    ) {
+        if is_reportable_fn(self.cx.tcx, def_id) {
+            self.bodies.insert(def_id, body);
+        }
+    }
+
+    fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
+        let build_assert = self
+            .cx
+            .get_klint_diagnostic_item(crate::symbol::build_assert);
+
+        let mut body_owners: Vec<_> = self.bodies.keys().copied().collect();
+        body_owners.sort_by_key(|&def_id| cx.tcx.def_span(def_id).lo());
+        let indirect_candidates = collect_indirect_candidates(cx.tcx, &self.bodies, &body_owners);
+        let summaries = compute_summaries(
+            cx.tcx,
+            &self.bodies,
+            &body_owners,
+            build_assert,
+            &indirect_candidates,
+        );
+
+        for def_id in body_owners {
+            let Some(summary) = summaries.get(&def_id) else {
+                continue;
+            };
+
+            if summary.requirement.requires_inline()
+                && !has_inline_always(cx.tcx, def_id.to_def_id())
+            {
+                emit_build_assert_not_inlined(cx, def_id, summary);
+            }
+        }
+    }
 }

@@ -1,5 +1,6 @@
 pub(crate) mod use_stack;
 
+use rustc_errors::{Diag, DiagCtxtHandle, Diagnostic, Level};
 use rustc_middle::ty::PseudoCanonicalInput;
 
 pub struct PolyDisplay<'a, 'tcx, T>(pub &'a PseudoCanonicalInput<'tcx, T>);
@@ -21,5 +22,15 @@ where
             }
         }
         Ok(())
+    }
+}
+
+pub(crate) struct ClosureDiag<F: FnOnce(&mut Diag<'_, ()>)>(pub F);
+
+impl<'a, F: FnOnce(&mut Diag<'_, ()>)> Diagnostic<'a, ()> for ClosureDiag<F> {
+    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, ()> {
+        let mut lint = Diag::new(dcx, level, "");
+        (self.0)(&mut lint);
+        lint
     }
 }

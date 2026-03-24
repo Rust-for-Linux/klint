@@ -3,12 +3,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use rustc_data_structures::fx::FxHashSet;
-use rustc_errors::{Diag, DiagCtxtHandle, Diagnostic, Level};
 use rustc_lint::{LateContext, LateLintPass, LintContext};
 use rustc_middle::ty::Instance;
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 use rustc_span::sym;
 
+use crate::diagnostic::ClosureDiag;
 use crate::mono_graph::collect_instance_use_graph;
 use crate::monomorphize_collector::MonoItemCollectionStrategy;
 
@@ -19,16 +19,6 @@ declare_tool_lint! {
 }
 
 declare_lint_pass!(InfallibleAllocation => [INFALLIBLE_ALLOCATION]);
-
-struct ClosureDiag<F: FnOnce(&mut Diag<'_, ()>)>(F);
-
-impl<'a, F: FnOnce(&mut Diag<'_, ()>)> Diagnostic<'a, ()> for ClosureDiag<F> {
-    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, ()> {
-        let mut lint = Diag::new(dcx, level, "");
-        (self.0)(&mut lint);
-        lint
-    }
-}
 
 fn is_generic_fn<'tcx>(instance: Instance<'tcx>) -> bool {
     instance.args.non_erasable_generics().next().is_some()
