@@ -54,3 +54,4 @@ If you want to check it out, you can opt into it with `-Dklint::atomic_context`.
 * [`build_error` checks](doc/build_error.md)
 * [Stack frame size check](doc/stack_size.md)
 * [Prelude check](doc/not_using_prelude.md)
+* [Assertion hierarchy](doc/assert_hierarchy.md)
