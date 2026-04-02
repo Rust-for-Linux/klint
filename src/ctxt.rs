@@ -305,7 +305,21 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             Ok(())
         })
         .unwrap();
-        conn.execute("begin immediate", ()).unwrap();
+
+        // Don't create separate -jorunal files, which makes gitignore harder.
+        conn.pragma_update(None, "journal_mode", "MEMORY").unwrap();
+
+        // Cargo may launch a dependent compilation once metadata has been generated
+        // but not yet fully compiled. For various reasons this is bad for klint as it wants to
+        // do some analysis at later stages and possibly want to preserve them inside metadata.
+        //
+        // Set locking mode to exclusive so that sqlite takes file lock and thus no dependent
+        // compilations can observe unwritten metadata.
+        //
+        // If we move away from sqlite in the future, take a manual flock instead.
+        conn.pragma_update(None, "locking_mode", "EXCLUSIVE").unwrap();
+
+        conn.execute("begin exclusive", ()).unwrap();
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .unwrap();
 
