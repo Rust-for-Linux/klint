@@ -101,7 +101,19 @@ impl<C: CallbacksExt> Callbacks for CallbackWrapper<C> {
     }
 
     fn after_analysis<'tcx>(&mut self, compiler: &Compiler, tcx: TyCtxt<'tcx>) -> Compilation {
-        self.callback.lock().unwrap().after_analysis(compiler, tcx)
+        let ret = self.callback.lock().unwrap().after_analysis(compiler, tcx);
+
+        if tcx.sess.opts.unstable_opts.no_codegen || !tcx.sess.opts.output_types.should_codegen() {
+            // Normally we destory `cx` in `codegen_crate`. However when codegen is not happening,
+            // that will not be invoked, and this is our last change to do cleanups.
+            let tcx_addr = *tcx as *const _ as usize;
+            let cx = TCX_EXT_MAP.lock().unwrap().remove(&tcx_addr).unwrap();
+            assert!(cx.is::<C::ExtCtxt<'static>>());
+            // SAFETY: we just check the (type-erased) type matches.
+            drop(unsafe { Box::from_raw(Box::into_raw(cx) as *mut C::ExtCtxt<'tcx>) });
+        }
+
+        ret
     }
 }
 
