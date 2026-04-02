@@ -1,0 +1,309 @@
+ WARN klint::atomic_context Unable to determine property for FFI function `const_only_entry`
+ WARN klint::atomic_context Unable to determine property for FFI function `const_only_entry`
+ WARN klint::atomic_context Unable to determine property for FFI function `runtime_entry`
+ WARN klint::atomic_context Unable to determine property for FFI function `runtime_entry`
+ WARN klint::atomic_context Unable to determine property for FFI function `wrapper_entry`
+ WARN klint::atomic_context Unable to determine property for FFI function `wrapper_entry`
+ WARN klint::atomic_context Unable to determine property for FFI function `inline_runtime_entry`
+ WARN klint::atomic_context Unable to determine property for FFI function `inline_runtime_entry`
+ WARN klint::atomic_context Unable to determine property for FFI function `inline_wrapper`
+ WARN klint::atomic_context Unable to determine property for FFI function `inline_wrapper`
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+  --> $DIR/build_assert_not_inlined.rs:77:1
+   |
+77 | fn runtime_direct(offset: usize, n: usize) {
+   | ^
+   |
+note: `build_assert!` uses non-static values here and relies on the surrounding call chain being inlined
+  --> $DIR/build_assert_not_inlined.rs:78:5
+   |
+78 |     build_assert!(offset < n);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+note: the lint level is defined here
+  --> $DIR/build_assert_not_inlined.rs:1:9
+   |
+ 1 | #![deny(klint::build_assert_not_inlined)]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+   |
+77 + #[inline(always)]
+78 | fn runtime_direct(offset: usize, n: usize) {
+   |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+  --> $DIR/build_assert_not_inlined.rs:85:1
+   |
+85 | fn runtime_param_const_generic<const N: usize>(offset: usize) {
+   | ^
+   |
+note: `build_assert!` uses non-static values here and relies on the surrounding call chain being inlined
+  --> $DIR/build_assert_not_inlined.rs:86:5
+   |
+86 |     build_assert!(offset < N);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+   |
+85 + #[inline(always)]
+86 | fn runtime_param_const_generic<const N: usize>(offset: usize) {
+   |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+  --> $DIR/build_assert_not_inlined.rs:89:1
+   |
+89 | fn runtime_helper_call<const N: usize>(offset: usize) {
+   | ^
+   |
+note: `build_assert!` uses non-static values here and relies on the surrounding call chain being inlined
+  --> $DIR/build_assert_not_inlined.rs:90:5
+   |
+90 |     build_assert!(passthrough(offset) < N);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+   |
+89 + #[inline(always)]
+90 | fn runtime_helper_call<const N: usize>(offset: usize) {
+   |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+  --> $DIR/build_assert_not_inlined.rs:97:1
+   |
+97 | fn runtime_predicate_helper_call(offset: usize, n: usize) {
+   | ^
+   |
+note: `build_assert!` uses non-static values here and relies on the surrounding call chain being inlined
+  --> $DIR/build_assert_not_inlined.rs:98:5
+   |
+98 |     build_assert!(runtime_predicate_helper(offset, n));
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+   |
+97 + #[inline(always)]
+98 | fn runtime_predicate_helper_call(offset: usize, n: usize) {
+   |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:101:1
+    |
+101 | fn runtime_helper_caller(offset: usize) {
+    | ^
+    |
+note: this call passes non-static values into `runtime_helper_call` which must be inlined for `build_assert!` to optimize away
+   --> $DIR/build_assert_not_inlined.rs:102:5
+    |
+102 |     runtime_helper_call::<LIMIT>(offset);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+101 + #[inline(always)]
+102 | fn runtime_helper_caller(offset: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:105:1
+    |
+105 | fn runtime_local(offset: usize, n: usize) {
+    | ^
+    |
+note: `build_assert!` uses non-static values here and relies on the surrounding call chain being inlined
+   --> $DIR/build_assert_not_inlined.rs:107:5
+    |
+107 |     build_assert!(current < n);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+105 + #[inline(always)]
+106 | fn runtime_local(offset: usize, n: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:110:1
+    |
+110 | fn runtime_match(offset: usize, n: usize) {
+    | ^
+    |
+note: `build_assert!` uses non-static values here and relies on the surrounding call chain being inlined
+   --> $DIR/build_assert_not_inlined.rs:111:5
+    |
+111 | /     build_assert!(match offset {
+112 | |         0 => true,
+113 | |         _ => offset < n,
+114 | |     });
+    | |______^
+help: mark this function `#[inline(always)]`
+    |
+110 + #[inline(always)]
+111 | fn runtime_match(offset: usize, n: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:117:1
+    |
+117 | fn runtime_caller(offset: usize, n: usize) {
+    | ^
+    |
+note: this call passes non-static values into `runtime_direct` which must be inlined for `build_assert!` to optimize away
+   --> $DIR/build_assert_not_inlined.rs:118:5
+    |
+118 |     runtime_direct(offset, n);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+117 + #[inline(always)]
+118 | fn runtime_caller(offset: usize, n: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:132:1
+    |
+132 | fn runtime_wrapper(offset: usize, n: usize) {
+    | ^
+    |
+note: `build_assert!` uses non-static values here and relies on the surrounding call chain being inlined
+   --> $DIR/build_assert_not_inlined.rs:133:5
+    |
+133 |     forward_build_assert!(offset < n);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+132 + #[inline(always)]
+133 | fn runtime_wrapper(offset: usize, n: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:136:1
+    |
+136 | fn runtime_wrapper_caller(offset: usize, n: usize) {
+    | ^
+    |
+note: this call passes non-static values into `runtime_wrapper` which must be inlined for `build_assert!` to optimize away
+   --> $DIR/build_assert_not_inlined.rs:137:5
+    |
+137 |     runtime_wrapper(offset, n);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+136 + #[inline(always)]
+137 | fn runtime_wrapper_caller(offset: usize, n: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:155:1
+    |
+155 | fn runtime_fnptr_target(offset: usize) {
+    | ^
+    |
+note: this call passes non-static values into `runtime_direct` which must be inlined for `build_assert!` to optimize away
+   --> $DIR/build_assert_not_inlined.rs:156:5
+    |
+156 |     runtime_direct(offset, LIMIT);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+155 + #[inline(always)]
+156 | fn runtime_fnptr_target(offset: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:196:5
+    |
+196 |     fn run(&self, offset: usize) {
+    |     ^
+    |
+note: this call passes non-static values into `runtime_direct` which must be inlined for `build_assert!` to optimize away
+   --> $DIR/build_assert_not_inlined.rs:197:9
+    |
+197 |         runtime_direct(offset, LIMIT);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+196 ~     #[inline(always)]
+197 ~     fn run(&self, offset: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:214:5
+    |
+214 |     fn io_addr_assert<U>(&self, offset: usize) -> usize {
+    |     ^
+    |
+note: `build_assert!` uses non-static values here and relies on the surrounding call chain being inlined
+   --> $DIR/build_assert_not_inlined.rs:215:9
+    |
+215 |         build_assert!(offset_valid::<U>(offset, Self::MIN_SIZE));
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+214 ~     #[inline(always)]
+215 ~     fn io_addr_assert<U>(&self, offset: usize) -> usize {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:232:1
+    |
+232 | fn trait_default_method_entry(offset: usize) {
+    | ^
+    |
+note: this call passes non-static values into `IoKnownSize::io_addr_assert` which must be inlined for `build_assert!` to optimize away
+   --> $DIR/build_assert_not_inlined.rs:234:13
+    |
+234 |     let _ = io.io_addr_assert::<u32>(offset);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+232 + #[inline(always)]
+233 | fn trait_default_method_entry(offset: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:254:1
+    |
+254 | fn partially_constant_caller(offset: usize) {
+    | ^
+    |
+note: this call passes non-static values into `runtime_direct` which must be inlined for `build_assert!` to optimize away
+   --> $DIR/build_assert_not_inlined.rs:255:5
+    |
+255 |     runtime_direct(offset, LIMIT);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+254 + #[inline(always)]
+255 | fn partially_constant_caller(offset: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:264:1
+    |
+264 | fn recursive_runtime_a(offset: usize, depth: usize) {
+    | ^
+    |
+note: this call passes non-static values into `recursive_runtime_a` which must be inlined for `build_assert!` to optimize away
+   --> $DIR/build_assert_not_inlined.rs:268:9
+    |
+268 |         recursive_runtime_a(offset, depth - 1);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+264 + #[inline(always)]
+265 | fn recursive_runtime_a(offset: usize, depth: usize) {
+    |
+
+error: this function depends on non-static values used by `build_assert!` and should be marked `#[inline(always)]`; otherwise its error path may fail to optimize away
+   --> $DIR/build_assert_not_inlined.rs:272:1
+    |
+272 | fn recursive_runtime_b(offset: usize) {
+    | ^
+    |
+note: `build_assert!` uses non-static values here and relies on the surrounding call chain being inlined
+   --> $DIR/build_assert_not_inlined.rs:274:9
+    |
+274 |         build_assert!(offset < LIMIT);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: mark this function `#[inline(always)]`
+    |
+272 + #[inline(always)]
+273 | fn recursive_runtime_b(offset: usize) {
+    |
+
+error: aborting due to 17 previous errors
+
