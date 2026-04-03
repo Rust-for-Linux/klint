@@ -59,6 +59,7 @@ mod ctxt;
 mod atomic_context;
 mod attribute;
 mod binary_analysis;
+mod build_assert_not_inlined;
 mod diagnostic;
 mod diagnostic_items;
 mod driver;
@@ -110,6 +111,7 @@ impl Callbacks for MyCallbacks {
                 infallible_allocation::INFALLIBLE_ALLOCATION,
                 atomic_context::ATOMIC_CONTEXT,
                 binary_analysis::stack_size::STACK_FRAME_TOO_LARGE,
+                build_assert_not_inlined::BUILD_ASSERT_NOT_INLINED,
                 hir_lints::c_str_literal::C_STR_LITERAL,
                 hir_lints::not_using_prelude::NOT_USING_PRELUDE,
             ]);
@@ -130,6 +132,12 @@ impl Callbacks for MyCallbacks {
             //     .register_late_pass(|_| Box::new(infallible_allocation::InfallibleAllocation));
             lint_store.register_late_pass(|tcx| {
                 Box::new(atomic_context::AtomicContext {
+                    cx: driver::cx::<MyCallbacks>(tcx),
+                })
+            });
+
+            lint_store.register_late_pass(|tcx| {
+                Box::new(build_assert_not_inlined::BuildAssertLints {
                     cx: driver::cx::<MyCallbacks>(tcx),
                 })
             });
