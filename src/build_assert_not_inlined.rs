@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use rustc_hir::def_id::{DefId, LocalDefId};
+use rustc_hir::def_id::{CrateNum, DefId, LocalDefId};
 use rustc_lint::{LateContext, LateLintPass, LintContext};
-use rustc_middle::ty::TyCtxt;
+use rustc_middle::ty::{Instance, PseudoCanonicalInput, TyCtxt};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
 use rustc_span::Span;
 
-use crate::ctxt::AnalysisCtxt;
+use crate::ctxt::{AnalysisCtxt, PersistentQuery};
 
 declare_tool_lint! {
     pub klint::BUILD_ASSERT_NOT_INLINED,
@@ -106,4 +106,56 @@ impl<'tcx> LateLintPass<'tcx> for BuildAssertLints<'tcx> {
     fn check_crate_post(&mut self, _cx: &LateContext<'tcx>) {
         let _ = self.cx;
     }
+}
+
+#[derive(Clone, PartialEq, Eq, Encodable, Decodable)]
+pub(crate) struct SmallSet<T>(Vec<T>);
+
+impl<T> Default for SmallSet<T> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Encodable, Decodable)]
+pub(crate) enum ExprDependency {
+    #[default]
+    Constant,
+    Param(SmallSet<usize>),
+    Runtime,
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Encodable, Decodable)]
+pub(crate) struct SemanticRequirementSummary {
+    pub(crate) param_dependencies: SmallSet<usize>,
+    has_local_runtime_dependency: bool,
+    has_unknown_dependency: bool,
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Encodable, Decodable)]
+pub(crate) struct SemanticFunctionSummary {
+    pub(crate) requirement: SemanticRequirementSummary,
+    return_dependency: ExprDependency,
+}
+
+memoize!(
+    pub(crate) fn instance_build_assert_summary<'tcx>(
+        _cx: &AnalysisCtxt<'tcx>,
+        _poly_instance: PseudoCanonicalInput<'tcx, Instance<'tcx>>,
+    ) -> Option<SemanticFunctionSummary> {
+        None
+    }
+);
+
+impl PersistentQuery for instance_build_assert_summary {
+    type LocalKey<'tcx> = Instance<'tcx>;
+
+    fn into_crate_and_local<'tcx>(key: Self::Key<'tcx>) -> (CrateNum, Self::LocalKey<'tcx>) {
+        let instance = key.value;
+        (instance.def_id().krate, instance)
+    }
+}
+
+impl<'tcx> AnalysisCtxt<'tcx> {
+    pub(crate) fn encode_build_assert_summaries(&self) {}
 }

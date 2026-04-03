@@ -55,6 +55,7 @@ pub struct AnalysisCtxt<'tcx> {
     pub tcx: TyCtxt<'tcx>,
     pub local_conn: Lock<Connection>,
     pub sql_conn: RwLock<FxHashMap<CrateNum, Option<Arc<Lock<Connection>>>>>,
+    pub metadata_finalized: Lock<bool>,
 
     pub call_stack: RwLock<Vec<UseSite<'tcx>>>,
     pub query_cache: RwLock<AnyMap<dyn Any + DynSend + DynSync>>,
@@ -112,11 +113,21 @@ const SCHEMA_VERSION: u32 = 1;
 
 impl Drop for AnalysisCtxt<'_> {
     fn drop(&mut self) {
-        self.local_conn.lock().execute("commit", ()).unwrap();
+        if !*self.metadata_finalized.get_mut() {
+            self.local_conn.lock().execute("commit", ()).unwrap();
+        }
     }
 }
 
 impl<'tcx> AnalysisCtxt<'tcx> {
+    pub(crate) fn finalize_metadata(&self) {
+        let mut finalized = self.metadata_finalized.lock();
+        if !*finalized {
+            self.local_conn.lock().execute("commit", ()).unwrap();
+            *finalized = true;
+        }
+    }
+
     pub(crate) fn query_cache<Q: Query>(
         &self,
     ) -> Arc<RwLock<FxHashMap<Q::Key<'tcx>, Q::Value<'tcx>>>> {
@@ -313,6 +324,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             tcx,
             local_conn: Lock::new(conn),
             sql_conn: Default::default(),
+            metadata_finalized: Lock::new(false),
             call_stack: Default::default(),
             query_cache: Default::default(),
         };
@@ -321,6 +333,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         );
         ret.sql_create_table::<crate::preempt_count::adjustment::instance_adjustment>();
         ret.sql_create_table::<crate::preempt_count::expectation::instance_expectation>();
+        ret.sql_create_table::<crate::build_assert_not_inlined::instance_build_assert_summary>();
         ret.sql_create_table::<crate::mir::analysis_mir>();
         ret.sql_create_table::<crate::diagnostic_items::klint_diagnostic_items>();
         ret

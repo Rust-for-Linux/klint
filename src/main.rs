@@ -154,6 +154,8 @@ impl Callbacks for MyCallbacks {
         // Ensure this query is run at least once, even without diagnostics emission, to
         // catch duplicate item errors.
         let _ = cx.klint_all_diagnostic_items();
+        cx.encode_build_assert_summaries();
+        cx.finalize_metadata();
 
         rustc_driver::Compilation::Continue
     }
