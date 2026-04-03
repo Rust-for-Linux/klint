@@ -6,7 +6,7 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::sync::{DynSend, DynSync, Lock, RwLock};
 use rustc_hir::def_id::{CrateNum, LOCAL_CRATE};
@@ -109,7 +109,7 @@ macro_rules! memoize {
     }
 }
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 impl Drop for AnalysisCtxt<'_> {
     fn drop(&mut self) {
@@ -169,25 +169,36 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             if !klint_path.exists() {
                 continue;
             }
-            let conn = Connection::open_with_flags(
+            let Ok(conn) = Connection::open_with_flags(
                 &klint_path,
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-            )
-            .unwrap();
+            ) else {
+                warn!(
+                    "failed to open klint metadata {}, ignoring",
+                    klint_path.display()
+                );
+                continue;
+            };
 
             // Check the schema version matches the current version
             let mut schema_ver = 0;
-            conn.pragma_query(None, "user_version", |r| {
+            let Ok(()) = conn.pragma_query(None, "user_version", |r| {
                 schema_ver = r.get::<_, u32>(0)?;
                 Ok(())
-            })
-            .unwrap();
+            }) else {
+                warn!(
+                    "failed to read schema version from klint metadata {}, ignoring",
+                    klint_path.display()
+                );
+                continue;
+            };
 
             if schema_ver != SCHEMA_VERSION {
                 info!(
                     "schema version of {} mismatch, ignoring",
                     klint_path.display()
                 );
+                continue;
             }
 
             result = Some(Arc::new(Lock::new(conn)));
@@ -226,16 +237,23 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         local_key.encode(&mut encode_ctx);
         let encoded = encode_ctx.finish();
 
-        let value_encoded: Vec<u8> = self
-            .sql_connection(cnum)?
-            .lock()
-            .query_row(
-                &format!("SELECT value FROM {} WHERE key = ?", Q::NAME),
-                rusqlite::params![encoded],
-                |row| row.get(0),
-            )
-            .optional()
-            .unwrap()?;
+        let value_encoded: Vec<u8> = match self.sql_connection(cnum)?.lock().query_row(
+            &format!("SELECT value FROM {} WHERE key = ?", Q::NAME),
+            rusqlite::params![encoded],
+            |row| row.get(0),
+        ) {
+            Ok(value) => Some(value),
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            Err(err) => {
+                warn!(
+                    "failed to load persistent query {} from crate {}, ignoring: {}",
+                    Q::NAME,
+                    self.tcx.crate_name(cnum),
+                    err
+                );
+                None
+            }
+        }?;
         let mut decode_ctx = crate::serde::DecodeContext::new(self.tcx, &value_encoded, span);
         let value = Q::decode_value(&mut decode_ctx);
         Some(value)

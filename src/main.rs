@@ -97,8 +97,9 @@ impl Callbacks for MyCallbacks {
             hook_query!(provider.queries.optimized_mir => |tcx, local_def_id, original| {
                 let def_id = local_def_id.to_def_id();
                 // Skip `analysis_mir` call if this is a constructor, since it will be delegated back to
-                // `optimized_mir` for building ADT constructor shim.
-                if !tcx.is_constructor(def_id) {
+                // `optimized_mir` for building ADT constructor shim. Also skip items that do not
+                // own MIR bodies, such as foreign function declarations from bindgen output.
+                if !tcx.is_constructor(def_id) && tcx.is_mir_available(def_id) {
                     let cx = crate::driver::cx::<MyCallbacks>(tcx);
                     let _ = cx.analysis_mir(def_id);
                 }
