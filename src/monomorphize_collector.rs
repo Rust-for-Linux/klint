@@ -1619,8 +1619,8 @@ pub fn collect_crate_mono_items(
 
     // The set of MonoItems was created in an inherently indeterministic order because
     // of parallelism. We sort it here to ensure that the output is deterministic.
-    let mono_items = tcx.with_stable_hashing_context(move |ref hcx| {
-        state.visited.into_inner().into_sorted(hcx, true)
+    let mono_items = tcx.with_stable_hashing_context(move |mut hcx| {
+        state.visited.into_inner().into_sorted(&mut hcx, true)
     });
 
     (mono_items, state.usage_map.into_inner())
