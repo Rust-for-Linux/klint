@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::LangItem;
-use rustc_middle::mir::mono::MonoItem;
+use rustc_middle::mono::MonoItem;
 use rustc_middle::ty::{Instance, TyCtxt};
 use rustc_middle::{mir, ty};
 use rustc_span::{BytePos, DUMMY_SP, FileName, RemapPathScopeComponents, Span};

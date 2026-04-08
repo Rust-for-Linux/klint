@@ -21,9 +21,9 @@ use rustc_hir::limit::Limit;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use rustc_middle::mir::interpret::AllocId;
 use rustc_middle::mir::interpret::{ErrorHandled, GlobalAlloc, Scalar};
-use rustc_middle::mir::mono::{CollectionMode, MonoItem};
 use rustc_middle::mir::visit::Visitor as MirVisitor;
 use rustc_middle::mir::{self, Location, MentionedItem, traversal};
+use rustc_middle::mono::{CollectionMode, MonoItem};
 use rustc_middle::query::TyCtxtAt;
 use rustc_middle::ty::adjustment::{CustomCoerceUnsized, PointerCoercion};
 use rustc_middle::ty::layout::ValidityRequirement;
@@ -405,11 +405,9 @@ fn collect_items_rec<'tcx>(
     {
         let mut visited = OnceCell::default();
         if mode == CollectionMode::UsedItems {
-            used_items.items.retain(|k, _| {
-                visited
-                    .get_mut_or_init(|| state.visited.lock())
-                    .insert(*k)
-            });
+            used_items
+                .items
+                .retain(|k, _| visited.get_mut_or_init(|| state.visited.lock()).insert(*k));
         }
 
         let mut mentioned = OnceCell::default();

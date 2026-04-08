@@ -317,7 +317,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         // compilations can observe unwritten metadata.
         //
         // If we move away from sqlite in the future, take a manual flock instead.
-        conn.pragma_update(None, "locking_mode", "EXCLUSIVE").unwrap();
+        conn.pragma_update(None, "locking_mode", "EXCLUSIVE")
+            .unwrap();
 
         conn.execute("begin exclusive", ()).unwrap();
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)

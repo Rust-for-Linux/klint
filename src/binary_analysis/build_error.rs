@@ -1,5 +1,5 @@
 use object::{File, Object, ObjectSection, ObjectSymbol, RelocationTarget};
-use rustc_middle::mir::mono::MonoItem;
+use rustc_middle::mono::MonoItem;
 use rustc_middle::ty::{Instance, TypingEnv};
 use rustc_span::Span;
 
