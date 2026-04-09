@@ -15,7 +15,7 @@ use rustc_metadata::creader::MetadataLoaderDyn;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::util::Providers;
-use rustc_session::config::{OutputFilenames, PrintRequest};
+use rustc_session::config::{OutputFilenames, OutputType, PrintRequest};
 use rustc_session::{EarlyDiagCtxt, Session};
 
 pub trait CallbacksExt: Callbacks + Send + 'static {
@@ -134,6 +134,18 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
     fn codegen_crate<'tcx>(&self, tcx: TyCtxt<'tcx>, crate_info: &CrateInfo) -> Box<dyn Any> {
         let ongoing_codegen = self.backend.codegen_crate(tcx, crate_info);
         let outputs = tcx.output_filenames(());
+
+        // HACK: ZFS contains a bug that if std::fs::copy overwrites an existing file,
+        // the data read back might be corrupted. Workaround this by removing the file beforehand.
+        // https://github.com/openzfs/zfs/issues/18412
+        // Remove once the fix has landed in all supported releases of ZFS.
+        if outputs.outputs.contains_key(&OutputType::Object) {
+            let file = outputs.path(OutputType::Object);
+            if !file.is_stdout() {
+                _ = std::fs::remove_file(file.as_path());
+            }
+        }
+
         let (cg, work_map) = self
             .backend
             .join_codegen(ongoing_codegen, tcx.sess, outputs);
