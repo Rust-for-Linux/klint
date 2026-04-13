@@ -549,10 +549,15 @@ where
                 let subpath = self.elaborator.field_subpath(variant_path, field_idx);
                 let tcx = self.tcx();
 
-                assert_eq!(
-                    self.elaborator.typing_env().typing_mode,
-                    ty::TypingMode::PostAnalysis
-                );
+                match self.elaborator.typing_env().typing_mode() {
+                    ty::TypingMode::PostAnalysis => {}
+                    ty::TypingMode::Coherence
+                    | ty::TypingMode::Analysis { .. }
+                    | ty::TypingMode::Borrowck { .. }
+                    | ty::TypingMode::PostBorrowckAnalysis { .. } => {
+                        bug!()
+                    }
+                }
                 let field_ty = match tcx.try_normalize_erasing_regions(
                     self.elaborator.typing_env(),
                     field.ty(tcx, args),
