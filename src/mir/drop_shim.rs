@@ -41,11 +41,11 @@ pub fn build_drop_shim<'tcx>(
     if let ty::Coroutine(gen_def_id, args) = ty.kind() {
         let body = cx.analysis_mir(*gen_def_id).coroutine_drop().unwrap();
         let body = EarlyBinder::bind(body.clone()).instantiate(cx.tcx, args);
-        return body;
+        return body.skip_norm_wip();
     }
 
     let args = cx.mk_args(&[ty.into()]);
-    let sig = cx.fn_sig(def_id).instantiate(cx.tcx, args);
+    let sig = cx.fn_sig(def_id).instantiate(cx.tcx, args).skip_norm_wip();
     let sig = cx.instantiate_bound_regions_with_erased(sig);
     let span = cx.def_span(def_id);
 

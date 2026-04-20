@@ -10,7 +10,7 @@ use rustc_middle::mir::{self, Body, Location, visit::Visitor as MirVisitor};
 use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::{
     self, GenericArgs, GenericParamDefKind, Instance, PseudoCanonicalInput, Ty, TyCtxt,
-    TypeFoldable, TypeVisitableExt, TypingEnv, Upcast,
+    TypeFoldable, TypeVisitableExt, TypingEnv, Unnormalized, Upcast,
 };
 use rustc_span::{DUMMY_SP, Span};
 
@@ -511,6 +511,7 @@ memoize!(
                 let super_traits = cx
                     .explicit_super_predicates_of(trait_ref.def_id())
                     .iter_identity_copied()
+                    .map(Unnormalized::skip_norm_wip)
                     .filter_map(|(pred, _)| {
                         pred.instantiate_supertrait(cx.tcx, trait_ref)
                             .as_trait_clause()
@@ -537,7 +538,9 @@ memoize!(
                     let predicates = cx.predicates_of(entry).instantiate_own(cx.tcx, args);
                     if rustc_trait_selection::traits::impossible_predicates(
                         cx.tcx,
-                        predicates.map(|(predicate, _)| predicate).collect(),
+                        predicates
+                            .map(|(predicate, _)| predicate.skip_norm_wip())
+                            .collect(),
                     ) {
                         continue;
                     }
