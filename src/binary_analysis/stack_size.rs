@@ -73,7 +73,6 @@ pub fn stack_size_check<'tcx, 'obj>(cx: &AnalysisCtxt<'tcx>, file: &File<'obj>) 
     // Instead, we find via `CONFIG_FRAME_WARN` cfg.
     let frame_limit_sym = cx
         .sess
-        .psess
         .config
         .iter()
         .copied()
