@@ -10,7 +10,7 @@ use rustc_hir::{self as hir, def::DefKind};
 use rustc_middle::mir::CallSource;
 use rustc_middle::mir::{
     Body, ConstOperand, LocalDecl, Operand, Place, ProjectionElem, Rvalue, SourceInfo, Statement,
-    StatementKind, TerminatorKind,
+    StatementKind, TerminatorKind, WithRetag,
 };
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_span::def_id::{CrateNum, DefId, DefIndex, LocalDefId};
@@ -74,7 +74,7 @@ fn remap_mir_for_const_eval_select<'tcx>(
                                 SourceInfo::outermost(fn_span),
                                 StatementKind::Assign(Box::new((
                                     local.into(),
-                                    Rvalue::Use(tupled_args.node.clone()),
+                                    Rvalue::Use(tupled_args.node.clone(), WithRetag::Yes),
                                 ))),
                             ));
                             (Operand::Move, local.into())
