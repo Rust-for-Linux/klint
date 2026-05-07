@@ -551,7 +551,7 @@ where
                 let subpath = self.elaborator.field_subpath(variant_path, field_idx);
                 let tcx = self.tcx();
 
-                match self.elaborator.typing_env().typing_mode() {
+                match self.elaborator.typing_env().typing_mode().assert_not_erased() {
                     ty::TypingMode::PostAnalysis => {}
                     ty::TypingMode::Coherence
                     | ty::TypingMode::Analysis { .. }
