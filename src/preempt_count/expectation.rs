@@ -471,10 +471,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         );
         let span = MultiSpan::new();
 
-        // Do not call `resolve_drop_in_place` because we need typing_env.
-        let drop_in_place = self.require_lang_item(LangItem::DropInPlace, DUMMY_SP);
+        // Do not call `resolve_drop_glue` because we need typing_env.
+        let drop_glue = self.require_lang_item(LangItem::DropGlue, DUMMY_SP);
         let args = self.mk_args(&[ty.into()]);
-        let instance = ty::Instance::try_resolve(self.tcx, typing_env, drop_in_place, args)
+        let instance = ty::Instance::try_resolve(self.tcx, typing_env, drop_glue, args)
             .unwrap()
             .unwrap();
 
@@ -757,10 +757,10 @@ memoize!(
             _ => return Err(Error::TooGeneric),
         }
 
-        // Do not call `resolve_drop_in_place` because we need typing_env.
-        let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, DUMMY_SP);
+        // Do not call `resolve_drop_glue` because we need typing_env.
+        let drop_glue = cx.require_lang_item(LangItem::DropGlue, DUMMY_SP);
         let args = cx.mk_args(&[ty.into()]);
-        let instance = ty::Instance::try_resolve(cx.tcx, typing_env, drop_in_place, args)
+        let instance = ty::Instance::try_resolve(cx.tcx, typing_env, drop_glue, args)
             .unwrap()
             .unwrap();
         let poly_instance = typing_env.as_query_input(instance);
@@ -884,10 +884,10 @@ memoize!(
             return Ok(());
         }
 
-        // Do not call `resolve_drop_in_place` because we need typing_env.
-        let drop_in_place = cx.require_lang_item(LangItem::DropInPlace, DUMMY_SP);
+        // Do not call `resolve_drop_glue` because we need typing_env.
+        let drop_glue = cx.require_lang_item(LangItem::DropGlue, DUMMY_SP);
         let args = cx.mk_args(&[ty.into()]);
-        let instance = ty::Instance::try_resolve(cx.tcx, typing_env, drop_in_place, args)
+        let instance = ty::Instance::try_resolve(cx.tcx, typing_env, drop_glue, args)
             .unwrap()
             .unwrap();
 

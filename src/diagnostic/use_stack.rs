@@ -93,7 +93,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     ) {
         for site in use_stack.iter().rev() {
             let def_id = site.instance.value.def_id();
-            if self.is_lang_item(def_id, LangItem::DropInPlace) {
+            if self.is_lang_item(def_id, LangItem::DropGlue) {
                 let ty = site.instance.value.args[0];
                 diag.note(format!("which is called from drop glue of `{ty}`"));
                 continue;

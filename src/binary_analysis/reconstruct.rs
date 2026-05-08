@@ -135,7 +135,7 @@ pub fn recover_fn_call_span<'tcx>(
                     ty::EarlyBinder::bind(ty),
                 );
 
-                let instance = Instance::resolve_drop_in_place(tcx, ty);
+                let instance = Instance::resolve_drop_glue(tcx, ty);
                 if tcx.symbol_name(instance).name != callee {
                     continue;
                 }
