@@ -131,8 +131,8 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
         self.backend.target_cpu(sess)
     }
 
-    fn codegen_crate<'tcx>(&self, tcx: TyCtxt<'tcx>, crate_info: &CrateInfo) -> Box<dyn Any> {
-        let ongoing_codegen = self.backend.codegen_crate(tcx, crate_info);
+    fn codegen_crate<'tcx>(&self, tcx: TyCtxt<'tcx>) -> Box<dyn Any> {
+        let ongoing_codegen = self.backend.codegen_crate(tcx);
         let outputs = tcx.output_filenames(());
 
         // HACK: ZFS contains a bug that if std::fs::copy overwrites an existing file,
@@ -146,9 +146,11 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
             }
         }
 
-        let (cg, work_map) = self
-            .backend
-            .join_codegen(ongoing_codegen, tcx.sess, outputs);
+        let crate_info = CrateInfo::new(tcx, self.backend.target_cpu(tcx.sess));
+
+        let (cg, work_map) =
+            self.backend
+                .join_codegen(ongoing_codegen, tcx.sess, outputs, &crate_info);
 
         self.callback.lock().unwrap().after_codegen(cx::<C>(tcx));
 
@@ -167,6 +169,7 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
         ongoing_codegen: Box<dyn Any>,
         _sess: &Session,
         _outputs: &OutputFilenames,
+        _crate_info: &CrateInfo,
     ) -> (CompiledModules, FxIndexMap<WorkProductId, WorkProduct>) {
         *ongoing_codegen.downcast().unwrap()
     }
