@@ -11,7 +11,7 @@ use rustc_index::Idx;
 use rustc_middle::mir::*;
 use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::util::IntTypeExt;
-use rustc_middle::ty::{self, GenericArg, GenericArgsRef, Ty, TyCtxt, Unnormalized};
+use rustc_middle::ty::{self, GenericArg, GenericArgsRef, Ty, TyCtxt};
 use rustc_middle::{span_bug, traits};
 use rustc_span::{DUMMY_SP, Spanned, dummy_spanned};
 use tracing::{debug, instrument};
@@ -371,7 +371,9 @@ where
                 bug!();
             };
             let obj_ptr_ty = Ty::new_mut_ptr(tcx, drop_ty);
-            let unwrap_ty = adt_def.non_enum_variant().fields[FieldIdx::ZERO].ty(tcx, adt_args);
+            let unwrap_ty = adt_def.non_enum_variant().fields[FieldIdx::ZERO]
+                .ty(tcx, adt_args)
+                .skip_norm_wip();
             let obj_ref_place = Place::from(self.new_temp(unwrap_ty));
             call_statements.push(self.assign(
                 obj_ref_place,
@@ -566,19 +568,11 @@ where
                     }
                 }
                 let field_ty = field.ty(tcx, args);
-                let field_ty = match tcx.try_normalize_erasing_regions(
-                    self.elaborator.typing_env(),
-                    Unnormalized::new_wip(field_ty),
-                ) {
-                    Ok(t) => t,
-                    Err(_) => Ty::new_error(
-                        self.tcx(),
-                        self.tcx().dcx().span_delayed_bug(
-                            self.elaborator.body().span,
-                            "Error normalizing in drop elaboration.",
-                        ),
-                    ),
-                };
+                // We silently leave an unnormalized type here to support polymorphic drop
+                // elaboration for users of rustc internal APIs
+                let field_ty = tcx
+                    .try_normalize_erasing_regions(self.elaborator.typing_env(), field_ty)
+                    .unwrap_or(field_ty.skip_norm_wip());
 
                 (tcx.mk_place_field(base_place, field_idx, field_ty), subpath)
             })
@@ -781,9 +775,13 @@ where
     ) -> BasicBlock {
         // drop glue is sent straight to codegen
         // box cannot be directly dereferenced
-        let unique_ty = adt.non_enum_variant().fields[FieldIdx::ZERO].ty(self.tcx(), args);
+        let unique_ty = adt.non_enum_variant().fields[FieldIdx::ZERO]
+            .ty(self.tcx(), args)
+            .skip_norm_wip();
         let unique_variant = unique_ty.ty_adt_def().unwrap().non_enum_variant();
-        let nonnull_ty = unique_variant.fields[FieldIdx::ZERO].ty(self.tcx(), args);
+        let nonnull_ty = unique_variant.fields[FieldIdx::ZERO]
+            .ty(self.tcx(), args)
+            .skip_norm_wip();
         let ptr_ty = Ty::new_imm_ptr(self.tcx(), args[0].expect_ty());
 
         let unique_place = self
@@ -954,10 +952,12 @@ where
                 have_otherwise = true;
 
                 let typing_env = self.elaborator.typing_env();
-                let have_field_with_drop_glue = variant
-                    .fields
-                    .iter()
-                    .any(|field| field.ty(tcx, args).needs_drop(tcx, typing_env));
+                let have_field_with_drop_glue = variant.fields.iter().any(|field| {
+                    field
+                        .ty(tcx, args)
+                        .skip_norm_wip()
+                        .needs_drop(tcx, typing_env)
+                });
                 if have_field_with_drop_glue {
                     have_otherwise_with_drop_glue = true;
                 }
