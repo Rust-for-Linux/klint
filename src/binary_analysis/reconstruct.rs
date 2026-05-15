@@ -180,6 +180,12 @@ pub fn recover_fn_call_span<'tcx>(
         if scope.inlined_parent_scope.is_none()
             && let Some((instance, span)) = scope.inlined
         {
+            let instance = caller.instantiate_mir_and_normalize_erasing_regions(
+                tcx,
+                ty::TypingEnv::fully_monomorphized(),
+                ty::EarlyBinder::bind(instance),
+            );
+
             if tcx.symbol_name(instance).name != callee {
                 continue;
             }
