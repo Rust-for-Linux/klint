@@ -933,14 +933,20 @@ pub fn find_tails_for_unsizing<'tcx>(
     source_ty: Ty<'tcx>,
     target_ty: Ty<'tcx>,
 ) -> (Ty<'tcx>, Ty<'tcx>) {
-    match (&source_ty.kind(), &target_ty.kind()) {
+    match (source_ty.kind(), target_ty.kind()) {
+        (&ty::Pat(source, _), &ty::Pat(target, _)) => {
+            find_tails_for_unsizing(tcx, typing_env, source, target)
+        }
         (
             &ty::Ref(_, source_pointee, _),
             &ty::Ref(_, target_pointee, _) | &ty::RawPtr(target_pointee, _),
         )
         | (&ty::RawPtr(source_pointee, _), &ty::RawPtr(target_pointee, _)) => {
-            tcx.struct_lockstep_tails_for_codegen(*source_pointee, *target_pointee, typing_env)
+            tcx.struct_lockstep_tails_for_codegen(source_pointee, target_pointee, typing_env)
         }
+
+        // `Box<T>` could go through the ADT code below, b/c it'll unpeel to `Unique<T>`,
+        // and eventually bottom out in a raw ref, but we can micro-optimize it here.
         (_, _)
             if let Some(source_boxed) = source_ty.boxed_ty()
                 && let Some(target_boxed) = target_ty.boxed_ty() =>
@@ -966,6 +972,7 @@ pub fn find_tails_for_unsizing<'tcx>(
                 tcx.normalize_erasing_regions(typing_env, coerce_field.ty(*tcx, target_args));
             find_tails_for_unsizing(tcx, typing_env, source_field, target_field)
         }
+
         _ => bug!(
             "find_tails_for_unsizing: invalid coercion {:?} -> {:?}",
             source_ty,
