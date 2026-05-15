@@ -114,6 +114,13 @@ pub fn build_error_detection<'tcx, 'obj>(cx: &AnalysisCtxt<'tcx>, file: &File<'o
                 }
 
                 let result: Result<_, super::dwarf::Error> = try {
+                     // Try to recover line information from DWARF. This may not succeed if LLVM
+                     // merged code from multiple call sites.
+                     //
+                     // If this happens there's no easy way to determine which inlined call sites
+                     // triggered this. We *could* attempt some more advanced heuristics, e.g.
+                     // reconstruct the control flow from assembly and then find the predecessor
+                     // blocks that lead to this, but there'll be no way of determining for sure.
                     let loc = loader.locate(section.index(), offset)?.ok_or(
                         super::dwarf::Error::UnexpectedDwarf("cannot find line number info"),
                     )?;
