@@ -51,11 +51,11 @@ struct StackFrameTooLarge<'a, 'tcx> {
 }
 
 pub fn stack_size_check<'tcx, 'obj>(cx: &AnalysisCtxt<'tcx>, file: &File<'obj>) {
-    let lint_cfg = cx.lint_level_at_node(STACK_FRAME_TOO_LARGE, CRATE_HIR_ID);
+    let lint_cfg = cx.lint_level_spec_at_node(STACK_FRAME_TOO_LARGE, CRATE_HIR_ID);
     // Given inlining and cross-crate monomorphization happening, it does not make
     // a lot of sense to define this lint on anywhere except codegen unit level. So
     // just take levels from the crate root.
-    let level = match lint_cfg.level {
+    let level = match lint_cfg.level() {
         // Don't run any of the checks if the lint is allowed.
         // This is one of the more expensive checks.
         //
