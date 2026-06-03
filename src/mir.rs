@@ -2,17 +2,13 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-pub mod drop_shim;
-pub mod elaborate_drop;
-pub mod patch;
-
 use rustc_hir::{self as hir, def::DefKind};
 use rustc_middle::mir::CallSource;
 use rustc_middle::mir::{
     Body, ConstOperand, LocalDecl, Operand, Place, ProjectionElem, Rvalue, SourceInfo, Statement,
     StatementKind, TerminatorKind, WithRetag,
 };
-use rustc_middle::ty::{self, TyCtxt};
+use rustc_middle::ty::{self, EarlyBinder, Ty, TyCtxt, TypingEnv};
 use rustc_span::def_id::{CrateNum, DefId, DefIndex, LocalDefId};
 use rustc_span::{DUMMY_SP, Spanned, sym};
 
@@ -138,6 +134,22 @@ impl PersistentQuery for analysis_mir {
     fn into_crate_and_local<'tcx>(key: Self::Key<'tcx>) -> (CrateNum, Self::LocalKey<'tcx>) {
         (key.krate, key.index)
     }
+}
+
+pub fn build_drop_shim<'tcx>(
+    cx: &AnalysisCtxt<'tcx>,
+    def_id: DefId,
+    typing_env: TypingEnv<'tcx>,
+    ty: Ty<'tcx>,
+) -> Body<'tcx> {
+    // TODO: Replicate coroutine handling in rustc_mir_transform/shim.rs
+    if let ty::Coroutine(gen_def_id, args) = ty.kind() {
+        let body = cx.analysis_mir(*gen_def_id).coroutine_drop().unwrap();
+        let body = EarlyBinder::bind(body.clone()).instantiate(cx.tcx, args);
+        return body.skip_norm_wip();
+    }
+
+    rustc_mir_transform::build_drop_shim(cx.tcx, def_id, Some(ty), typing_env)
 }
 
 impl<'tcx> AnalysisCtxt<'tcx> {

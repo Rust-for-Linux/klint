@@ -36,6 +36,7 @@ extern crate rustc_lint;
 extern crate rustc_log;
 extern crate rustc_metadata;
 extern crate rustc_mir_dataflow;
+extern crate rustc_mir_transform;
 extern crate rustc_monomorphize;
 extern crate rustc_serialize;
 extern crate rustc_session;

@@ -750,7 +750,7 @@ memoize!(
             return Ok(());
         }
 
-        let mir = crate::mir::drop_shim::build_drop_shim(cx, instance.def_id(), typing_env, ty);
+        let mir = crate::mir::build_drop_shim(cx, instance.def_id(), typing_env, ty);
         cx.indirect_check(typing_env, instance, &mir)
     }
 );

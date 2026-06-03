@@ -478,7 +478,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             .unwrap()
             .unwrap();
 
-        let mir = crate::mir::drop_shim::build_drop_shim(self, instance.def_id(), typing_env, ty);
+        let mir = crate::mir::build_drop_shim(self, instance.def_id(), typing_env, ty);
         self.report_body_expectation_error(typing_env, instance, &mir, expected, Some(span), diag)
     }
 
@@ -786,7 +786,7 @@ memoize!(
             }
         }
 
-        let mir = crate::mir::drop_shim::build_drop_shim(cx, instance.def_id(), typing_env, ty);
+        let mir = crate::mir::build_drop_shim(cx, instance.def_id(), typing_env, ty);
         let result = cx.infer_expectation(typing_env, instance, &mir);
 
         // Recursion encountered.
@@ -896,7 +896,7 @@ memoize!(
             ty::InstanceKind::DropGlue(_, Some(_))
         ));
 
-        let mir = crate::mir::drop_shim::build_drop_shim(cx, instance.def_id(), typing_env, ty);
+        let mir = crate::mir::build_drop_shim(cx, instance.def_id(), typing_env, ty);
         let expectation_infer = cx.infer_expectation(typing_env, instance, &mir)?;
         // Check if the inferred expectation matches the annotation.
         if !expectation_infer.contains_range(expectation) {

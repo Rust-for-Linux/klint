@@ -447,7 +447,7 @@ memoize!(
             }
         }
 
-        let mir = crate::mir::drop_shim::build_drop_shim(cx, instance.def_id(), typing_env, ty);
+        let mir = crate::mir::build_drop_shim(cx, instance.def_id(), typing_env, ty);
         let result = cx.infer_adjustment(typing_env, instance, &mir);
 
         // Recursion encountered.
@@ -552,7 +552,7 @@ memoize!(
             ty::InstanceKind::DropGlue(_, Some(_))
         ));
 
-        let mir = crate::mir::drop_shim::build_drop_shim(cx, instance.def_id(), typing_env, ty);
+        let mir = crate::mir::build_drop_shim(cx, instance.def_id(), typing_env, ty);
         let adjustment_infer = cx.infer_adjustment(typing_env, instance, &mir)?;
         // Check if the inferred adjustment matches the annotation.
         if let Some(adjustment) = annotation.adjustment {
