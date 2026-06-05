@@ -700,7 +700,7 @@ memoize!(
             ty::Adt(def, _) => {
                 // For Adts, we first try to not use any of the args and just try the most
                 // polymorphic version of the type.
-                let poly_typing_env = TypingEnv::post_analysis(cx.tcx, def.did());
+                let poly_typing_env = TypingEnv::codegen(cx.tcx, def.did());
                 let poly_args = cx
                     .erase_and_anonymize_regions(GenericArgs::identity_for_item(cx.tcx, def.did()));
                 let poly_poly_ty = poly_typing_env
@@ -786,7 +786,7 @@ memoize!(
         }
 
         if matches!(instance.def, ty::InstanceKind::Item(_)) {
-            let poly_typing_env = TypingEnv::post_analysis(cx.tcx, instance.def_id());
+            let poly_typing_env = TypingEnv::codegen(cx.tcx, instance.def_id());
             let poly_args = cx.erase_and_anonymize_regions(GenericArgs::identity_for_item(
                 cx.tcx,
                 instance.def_id(),

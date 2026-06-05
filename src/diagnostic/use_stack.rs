@@ -75,7 +75,7 @@ pub struct UseSite<'tcx> {
 impl<'tcx> AnalysisCtxt<'tcx> {
     /// Obtain the polymorphic instance of `def_id`.
     fn poly_instance_of_def_id(&self, def_id: DefId) -> PseudoCanonicalInput<'tcx, Instance<'tcx>> {
-        let poly_typing_env = TypingEnv::post_analysis(self.tcx, def_id);
+        let poly_typing_env = TypingEnv::codegen(self.tcx, def_id);
         let poly_args =
             self.erase_and_anonymize_regions(GenericArgs::identity_for_item(self.tcx, def_id));
         poly_typing_env.as_query_input(Instance::new_raw(def_id, poly_args))

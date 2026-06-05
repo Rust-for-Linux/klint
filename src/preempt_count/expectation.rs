@@ -430,7 +430,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 }
 
                 let elem_adj = self.drop_adjustment(param_and_elem_ty)?;
-                let infcx = self.tcx.infer_ctxt().build(TypingMode::PostAnalysis);
+                let infcx = self.tcx.infer_ctxt().build(TypingMode::Codegen);
                 let size = rustc_trait_selection::traits::evaluate_const(
                     &infcx,
                     *size,
@@ -663,7 +663,7 @@ memoize!(
             ty::Adt(def, _) => {
                 // For Adts, we first try to not use any of the args and just try the most
                 // polymorphic version of the type.
-                let poly_typing_env = TypingEnv::post_analysis(cx.tcx, def.did());
+                let poly_typing_env = TypingEnv::codegen(cx.tcx, def.did());
                 let poly_args = cx
                     .erase_and_anonymize_regions(GenericArgs::identity_for_item(cx.tcx, def.did()));
                 let poly_poly_ty = poly_typing_env
@@ -697,7 +697,7 @@ memoize!(
             }
 
             ty::Array(elem_ty, size) => {
-                let infcx = cx.tcx.infer_ctxt().build(TypingMode::PostAnalysis);
+                let infcx = cx.tcx.infer_ctxt().build(TypingMode::Codegen);
                 let size = rustc_trait_selection::traits::evaluate_const(
                     &infcx,
                     *size,
@@ -854,7 +854,7 @@ memoize!(
             ty::Adt(def, _) => {
                 // For Adts, we first try to not use any of the args and just try the most
                 // polymorphic version of the type.
-                let poly_typing_env = TypingEnv::post_analysis(cx.tcx, def.did());
+                let poly_typing_env = TypingEnv::codegen(cx.tcx, def.did());
                 let poly_args = cx
                     .erase_and_anonymize_regions(GenericArgs::identity_for_item(cx.tcx, def.did()));
                 let poly_poly_ty = poly_typing_env
@@ -947,7 +947,7 @@ memoize!(
 
         let mut generic = false;
         if matches!(instance.def, ty::InstanceKind::Item(_)) {
-            let poly_typing_env = TypingEnv::post_analysis(cx.tcx, instance.def_id());
+            let poly_typing_env = TypingEnv::codegen(cx.tcx, instance.def_id());
             let poly_args = cx.erase_and_anonymize_regions(GenericArgs::identity_for_item(
                 cx.tcx,
                 instance.def_id(),
@@ -1109,7 +1109,7 @@ memoize!(
 
         // Prefer to do polymorphic check if possible.
         if matches!(instance.def, ty::InstanceKind::Item(_)) {
-            let poly_typing_env = TypingEnv::post_analysis(cx.tcx, instance.def_id());
+            let poly_typing_env = TypingEnv::codegen(cx.tcx, instance.def_id());
             let poly_args = cx.erase_and_anonymize_regions(GenericArgs::identity_for_item(
                 cx.tcx,
                 instance.def_id(),

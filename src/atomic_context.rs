@@ -439,7 +439,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
             .tcx
             .erase_and_anonymize_regions(GenericArgs::identity_for_item(self.cx.tcx, def_id));
         let instance = Instance::new_raw(def_id.into(), identity);
-        let poly_instance = TypingEnv::post_analysis(self.cx.tcx, def_id).as_query_input(instance);
+        let poly_instance = TypingEnv::codegen(self.cx.tcx, def_id).as_query_input(instance);
         let _ = self.cx.instance_adjustment(poly_instance);
         let _ = self.cx.instance_expectation(poly_instance);
         let _ = self.cx.instance_check(poly_instance);
