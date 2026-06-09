@@ -5,8 +5,9 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use rustc_codegen_ssa::traits::CodegenBackend;
 use rustc_codegen_ssa::{CompiledModules, CrateInfo, TargetConfig};
-use rustc_data_structures::fx::{FxHashMap, FxIndexMap};
+use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::sync::{DynSend, DynSync};
+use rustc_data_structures::unord::UnordMap;
 use rustc_driver::{Callbacks, Compilation};
 use rustc_interface::Config;
 use rustc_interface::interface::Compiler;
@@ -170,7 +171,7 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
         _sess: &Session,
         _outputs: &OutputFilenames,
         _crate_info: &CrateInfo,
-    ) -> (CompiledModules, FxIndexMap<WorkProductId, WorkProduct>) {
+    ) -> (CompiledModules, UnordMap<WorkProductId, WorkProduct>) {
         *ongoing_codegen.downcast().unwrap()
     }
 

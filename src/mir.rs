@@ -55,10 +55,11 @@ fn remap_mir_for_const_eval_select<'tcx>(
                 let ty = tupled_args.node.ty(&body.local_decls, tcx);
                 let fields = ty.tuple_fields();
                 let num_args = fields.len();
-                let func = if context == hir::Constness::Const {
-                    called_in_const
-                } else {
-                    called_at_rt
+                let func = match context {
+                    // Using `const_eval_select` in always-const code is useful when used in macros
+                    // that you don't know whether they are going to be used in `const fn` or in `const` items.
+                    hir::Constness::Const { .. } => called_in_const,
+                    hir::Constness::NotConst => called_at_rt,
                 };
                 let (method, place): (fn(Place<'tcx>) -> Operand<'tcx>, Place<'tcx>) =
                     match tupled_args.node {
