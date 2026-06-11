@@ -55,6 +55,9 @@ def! {
     // Diagnostic items
     c_str,
     build_error,
+    build_assert,
+    const_assert,
+    static_assert,
 
     CONFIG_FRAME_WARN,
 }

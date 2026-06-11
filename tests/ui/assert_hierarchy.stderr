@@ -1,0 +1,147 @@
+error: this assertion can use the stronger `static_assert!` form
+  --> $DIR/assert_hierarchy.rs:56:5
+   |
+56 |     build_assert!(1 < LIMIT);
+   |     ------------^^^^^^^^^^^^
+   |     |
+   |     help: replace the macro name: `static_assert`
+   |
+note: this asserted condition is closed over compile-time context, so `static_assert!` is the stronger form here
+  --> $DIR/assert_hierarchy.rs:56:19
+   |
+56 |     build_assert!(1 < LIMIT);
+   |                   ^^^^^^^^^
+note: the lint level is defined here
+  --> $DIR/assert_hierarchy.rs:1:9
+   |
+ 1 | #![deny(klint::assert_hierarchy)]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+error: this assertion can use the stronger `const_assert!` form
+  --> $DIR/assert_hierarchy.rs:60:5
+   |
+60 |     build_assert!(OFFSET < N, "offset must stay in bounds");
+   |     ------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |     |
+   |     help: replace the macro name: `const_assert`
+   |
+note: this asserted condition is valid in a generic-aware const context, so `build_assert!` is unnecessary here
+  --> $DIR/assert_hierarchy.rs:60:19
+   |
+60 |     build_assert!(OFFSET < N, "offset must stay in bounds");
+   |                   ^^^^^^^^^^
+
+error: this assertion can use the stronger `static_assert!` form
+  --> $DIR/assert_hierarchy.rs:64:5
+   |
+64 |     forward_build_assert!(OFFSET < LIMIT);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this asserted condition is closed over compile-time context, so `static_assert!` is the stronger form here
+  --> $DIR/assert_hierarchy.rs:64:27
+   |
+64 |     forward_build_assert!(OFFSET < LIMIT);
+   |                           ^^^^^^^^^^^^^^
+
+error: this assertion can use the stronger `const_assert!` form
+  --> $DIR/assert_hierarchy.rs:69:5
+   |
+69 |     forward_const_check!(N > 0);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this asserted condition is valid in a generic-aware const context, so `build_assert!` is unnecessary here
+  --> $DIR/assert_hierarchy.rs:69:26
+   |
+69 |     forward_const_check!(N > 0);
+   |                          ^^^^^
+
+error: this assertion can use the stronger `const_assert!` form
+  --> $DIR/assert_hierarchy.rs:77:5
+   |
+77 |     build_assert!(const_helper::<N>() < N);
+   |     ------------^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |     |
+   |     help: replace the macro name: `const_assert`
+   |
+note: this asserted condition is valid in a generic-aware const context, so `build_assert!` is unnecessary here
+  --> $DIR/assert_hierarchy.rs:77:19
+   |
+77 |     build_assert!(const_helper::<N>() < N);
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+error: this assertion can use the stronger `static_assert!` form
+  --> $DIR/assert_hierarchy.rs:89:5
+   |
+89 |       build_assert!(match LIMIT {
+   |       ^-----------
+   |       |
+   |  _____help: replace the macro name: `static_assert`
+   | |
+90 | |         4 => true,
+91 | |         _ => false,
+92 | |     });
+   | |______^
+   |
+note: this asserted condition is closed over compile-time context, so `static_assert!` is the stronger form here
+  --> $DIR/assert_hierarchy.rs:89:19
+   |
+89 |       build_assert!(match LIMIT {
+   |  ___________________^
+90 | |         4 => true,
+91 | |         _ => false,
+92 | |     });
+   | |_____^
+
+error: this assertion can use the stronger `static_assert!` form
+  --> $DIR/assert_hierarchy.rs:96:5
+   |
+96 |     build_assert!(1 /* , */ < LIMIT);
+   |     ------------^^^^^^^^^^^^^^^^^^^^
+   |     |
+   |     help: replace the macro name: `static_assert`
+   |
+note: this asserted condition is closed over compile-time context, so `static_assert!` is the stronger form here
+  --> $DIR/assert_hierarchy.rs:96:19
+   |
+96 |     build_assert!(1 /* , */ < LIMIT);
+   |                   ^^^^^^^^^^^^^^^^^
+
+error: this assertion can use the stronger `static_assert!` form
+   --> $DIR/assert_hierarchy.rs:100:5
+    |
+100 |     build_assert!(1 /* , */ < LIMIT, "still const");
+    |     ------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     |
+    |     help: replace the macro name: `static_assert`
+    |
+note: this asserted condition is closed over compile-time context, so `static_assert!` is the stronger form here
+   --> $DIR/assert_hierarchy.rs:100:19
+    |
+100 |     build_assert!(1 /* , */ < LIMIT, "still const");
+    |                   ^^^^^^^^^^^^^^^^^
+
+error: this assertion can use the stronger `const_assert!` form
+   --> $DIR/assert_hierarchy.rs:109:5
+    |
+109 |       build_assert!({
+    |       ^-----------
+    |       |
+    |  _____help: replace the macro name: `const_assert`
+    | |
+110 | |         let offset = OFFSET;
+111 | |         offset < LIMIT
+112 | |     });
+    | |______^
+    |
+note: this asserted condition is valid in a generic-aware const context, so `build_assert!` is unnecessary here
+   --> $DIR/assert_hierarchy.rs:109:19
+    |
+109 |       build_assert!({
+    |  ___________________^
+110 | |         let offset = OFFSET;
+111 | |         offset < LIMIT
+112 | |     });
+    | |_____^
+
+error: aborting due to 9 previous errors
+
