@@ -60,6 +60,7 @@ mod ctxt;
 mod atomic_context;
 mod attribute;
 mod binary_analysis;
+mod build_assert_not_inlined;
 mod diagnostic;
 mod diagnostic_items;
 mod driver;
@@ -97,8 +98,9 @@ impl Callbacks for MyCallbacks {
             hook_query!(provider.queries.optimized_mir => |tcx, local_def_id, original| {
                 let def_id = local_def_id.to_def_id();
                 // Skip `analysis_mir` call if this is a constructor, since it will be delegated back to
-                // `optimized_mir` for building ADT constructor shim.
-                if !tcx.is_constructor(def_id) {
+                // `optimized_mir` for building ADT constructor shim. Also skip items that do not
+                // own MIR bodies, such as foreign function declarations from bindgen output.
+                if !tcx.is_constructor(def_id) && tcx.is_mir_available(def_id) {
                     let cx = crate::driver::cx::<MyCallbacks>(tcx);
                     let _ = cx.analysis_mir(def_id);
                 }
@@ -111,6 +113,7 @@ impl Callbacks for MyCallbacks {
                 infallible_allocation::INFALLIBLE_ALLOCATION,
                 atomic_context::ATOMIC_CONTEXT,
                 binary_analysis::stack_size::STACK_FRAME_TOO_LARGE,
+                build_assert_not_inlined::BUILD_ASSERT_NOT_INLINED,
                 hir_lints::c_str_literal::C_STR_LITERAL,
                 hir_lints::not_using_prelude::NOT_USING_PRELUDE,
             ]);
@@ -134,6 +137,12 @@ impl Callbacks for MyCallbacks {
                     cx: driver::cx::<MyCallbacks>(tcx),
                 })
             });
+
+            lint_store.register_late_pass(|tcx| {
+                Box::new(build_assert_not_inlined::BuildAssertLints {
+                    cx: driver::cx::<MyCallbacks>(tcx),
+                })
+            });
         }));
     }
 
@@ -147,6 +156,8 @@ impl Callbacks for MyCallbacks {
         // Ensure this query is run at least once, even without diagnostics emission, to
         // catch duplicate item errors.
         let _ = cx.klint_all_diagnostic_items();
+        cx.encode_build_assert_summaries();
+        cx.finalize_metadata();
 
         rustc_driver::Compilation::Continue
     }

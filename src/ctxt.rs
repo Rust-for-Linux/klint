@@ -6,7 +6,7 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::sync::{DynSend, DynSync, Lock, RwLock};
 use rustc_hir::def_id::{CrateNum, LOCAL_CRATE};
@@ -55,6 +55,7 @@ pub struct AnalysisCtxt<'tcx> {
     pub tcx: TyCtxt<'tcx>,
     pub local_conn: Lock<Connection>,
     pub sql_conn: RwLock<FxHashMap<CrateNum, Option<Arc<Lock<Connection>>>>>,
+    pub metadata_finalized: Lock<bool>,
 
     pub call_stack: RwLock<Vec<UseSite<'tcx>>>,
     pub query_cache: RwLock<AnyMap<dyn Any + DynSend + DynSync>>,
@@ -108,15 +109,25 @@ macro_rules! memoize {
     }
 }
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 impl Drop for AnalysisCtxt<'_> {
     fn drop(&mut self) {
-        self.local_conn.lock().execute("commit", ()).unwrap();
+        if !*self.metadata_finalized.get_mut() {
+            self.local_conn.lock().execute("commit", ()).unwrap();
+        }
     }
 }
 
 impl<'tcx> AnalysisCtxt<'tcx> {
+    pub(crate) fn finalize_metadata(&self) {
+        let mut finalized = self.metadata_finalized.lock();
+        if !*finalized {
+            self.local_conn.lock().execute("commit", ()).unwrap();
+            *finalized = true;
+        }
+    }
+
     pub(crate) fn query_cache<Q: Query>(
         &self,
     ) -> Arc<RwLock<FxHashMap<Q::Key<'tcx>, Q::Value<'tcx>>>> {
@@ -158,25 +169,36 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             if !klint_path.exists() {
                 continue;
             }
-            let conn = Connection::open_with_flags(
+            let Ok(conn) = Connection::open_with_flags(
                 &klint_path,
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-            )
-            .unwrap();
+            ) else {
+                warn!(
+                    "failed to open klint metadata {}, ignoring",
+                    klint_path.display()
+                );
+                continue;
+            };
 
             // Check the schema version matches the current version
             let mut schema_ver = 0;
-            conn.pragma_query(None, "user_version", |r| {
+            let Ok(()) = conn.pragma_query(None, "user_version", |r| {
                 schema_ver = r.get::<_, u32>(0)?;
                 Ok(())
-            })
-            .unwrap();
+            }) else {
+                warn!(
+                    "failed to read schema version from klint metadata {}, ignoring",
+                    klint_path.display()
+                );
+                continue;
+            };
 
             if schema_ver != SCHEMA_VERSION {
                 info!(
                     "schema version of {} mismatch, ignoring",
                     klint_path.display()
                 );
+                continue;
             }
 
             result = Some(Arc::new(Lock::new(conn)));
@@ -215,16 +237,23 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         local_key.encode(&mut encode_ctx);
         let encoded = encode_ctx.finish();
 
-        let value_encoded: Vec<u8> = self
-            .sql_connection(cnum)?
-            .lock()
-            .query_row(
-                &format!("SELECT value FROM {} WHERE key = ?", Q::NAME),
-                rusqlite::params![encoded],
-                |row| row.get(0),
-            )
-            .optional()
-            .unwrap()?;
+        let value_encoded: Vec<u8> = match self.sql_connection(cnum)?.lock().query_row(
+            &format!("SELECT value FROM {} WHERE key = ?", Q::NAME),
+            rusqlite::params![encoded],
+            |row| row.get(0),
+        ) {
+            Ok(value) => Some(value),
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            Err(err) => {
+                warn!(
+                    "failed to load persistent query {} from crate {}, ignoring: {}",
+                    Q::NAME,
+                    self.tcx.crate_name(cnum),
+                    err
+                );
+                None
+            }
+        }?;
         let mut decode_ctx = crate::serde::DecodeContext::new(self.tcx, &value_encoded, span);
         let value = Q::decode_value(&mut decode_ctx);
         Some(value)
@@ -328,6 +357,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             tcx,
             local_conn: Lock::new(conn),
             sql_conn: Default::default(),
+            metadata_finalized: Lock::new(false),
             call_stack: Default::default(),
             query_cache: Default::default(),
         };
@@ -336,6 +366,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         );
         ret.sql_create_table::<crate::preempt_count::adjustment::instance_adjustment>();
         ret.sql_create_table::<crate::preempt_count::expectation::instance_expectation>();
+        ret.sql_create_table::<crate::build_assert_not_inlined::instance_build_assert_summary>();
         ret.sql_create_table::<crate::mir::analysis_mir>();
         ret.sql_create_table::<crate::diagnostic_items::klint_diagnostic_items>();
         ret
