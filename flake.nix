@@ -24,7 +24,7 @@
           inherit system overlays;
         };
 
-        rustc = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain;
+        rustc = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
       in
       {
         devShells.rustup = pkgs.mkShell {
@@ -75,6 +75,23 @@
 
               passthru.rustc = rustc;
             };
+
+        apps = {
+          latest-rustc = {
+            type = "app";
+            program = "${pkgs.writers.writeBash "latest-rustc" ''
+              echo ${pkgs.rust-bin.nightly.latest.rustc.version} | grep -Po 'nightly.*'
+            ''}";
+          };
+
+          update-rustc = {
+              type = "app";
+              program = "${pkgs.writers.writeBash "update-rustc" ''
+                nix flake update
+                sed -i "s/channel = .*/channel = \"$(nix run .#latest-rustc)\"/" rust-toolchain.toml
+              ''}";
+          };
+        };
 
         formatter = pkgs.nixfmt-tree;
       }
