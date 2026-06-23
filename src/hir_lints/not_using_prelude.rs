@@ -33,12 +33,17 @@ struct NotUsingPreludeLint {
 
 impl<'tcx> LateLintPass<'tcx> for NotUsingPrelude<'tcx> {
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
-        let ItemKind::Use(path, UseKind::Single(_)) = item.kind else {
+        let ItemKind::Use(path, UseKind::Single(import_name)) = item.kind else {
             return;
         };
 
         // Manual prelude import. This is possible the user trying to solve conflicts or performing a rename.
         if path.segments.iter().any(|x| x.ident.name == sym::prelude) {
+            return;
+        }
+
+        // If the import is renamed, that is likely intentional.
+        if path.segments.last().unwrap().ident != import_name {
             return;
         }
 

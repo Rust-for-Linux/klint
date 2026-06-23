@@ -1,0 +1,11 @@
+warning: this item is available via prelude
+ --> $DIR/not-using-prelude.rs:6:1
+  |
+6 | use not_prelude::v1;
+  | ^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: import with `core::prelude::*` instead
+  = note: `#[warn(klint::not_using_prelude)]` on by default
+
+warning: 1 warning emitted
+
