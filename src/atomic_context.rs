@@ -147,6 +147,21 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
             // FFI functions defined in C
 
+            // atomic.h
+            f if f.starts_with("atomic") => NO_ASSUMPTION,
+
+            // bitops.h
+            "__clear_bit" | "__set_bit" | "_find_next_bit" | "_find_next_zero_bit"
+            | "_find_last_bit" => NO_ASSUMPTION,
+
+            // bitmap.h
+            "bitmap_copy_and_extend" => NO_ASSUMPTION,
+            "bitmap_zalloc" => MIGHT_SLEEP,
+
+            // blk-mq.h
+            "blk_mq_rq_to_pdu" | "blk_mq_start_request" | "blk_mq_end_request" => NO_ASSUMPTION,
+            "blk_mq_alloc_tag_set" | "__blk_mq_alloc_disk" | "blk_mq_free_tag_set" => MIGHT_SLEEP,
+
             // bug.h
             "BUG" => NO_ASSUMPTION,
             "rust_build_error" => NO_ASSUMPTION,
@@ -159,7 +174,21 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             | "clk_prepare_enable"
             | "clk_disable_unprepare"
             | "clk_get"
-            | "clk_put" => MIGHT_SLEEP,
+            | "clk_put"
+            | "clk_set_rate" => MIGHT_SLEEP,
+
+            // completion.h
+            "init_completion" | "complete_all" => NO_ASSUMPTION,
+            "wait_for_completion" => MIGHT_SLEEP,
+
+            // cpufreq.h
+            "cpufreq_generic_frequency_table_verify" | "cpufreq_generic_get" => NO_ASSUMPTION,
+            "cpufreq_generic_suspend" | "cpufreq_register_driver"
+            | "cpufreq_unregister_driver" => MIGHT_SLEEP,
+
+            // cpumask.h
+            "cpumask_empty" | "__cpumask_set_cpu" | "__cpumask_clear_cpu"
+            | "cpumask_test_cpu" | "cpumask_weight" => NO_ASSUMPTION,
 
             // current.h
             "get_current" => NO_ASSUMPTION,
@@ -168,10 +197,17 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "msleep" => MIGHT_SLEEP,
 
             // device.h
-            "dev_name" => NO_ASSUMPTION,
+            "dev_name" | "__dev_fwnode" => NO_ASSUMPTION,
+
+            // devres.h
+            "devm_add_action_or_reset" => MIGHT_SLEEP,
+
+            // dma-mapping.h
+            "dma_max_mapping_size" | "dma_unmap_sgtable" => NO_ASSUMPTION,
+            "dma_alloc_attrs" | "dma_free_attrs" => MIGHT_SLEEP,
 
             // err.h
-            "IS_ERR" | "PTR_ERR" | "errname" => NO_ASSUMPTION,
+            "IS_ERR" | "PTR_ERR" | "ERR_PTR" | "errname" => NO_ASSUMPTION,
 
             // fs.h
             "alloc_chrdev_region" | "unregister_chrdev_region" => MIGHT_SLEEP,
@@ -180,8 +216,17 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "fs_param_is_bool" | "fs_param_is_enum" | "fs_param_is_s32" | "fs_param_is_string"
             | "fs_param_is_u32" | "fs_param_is_u64" => NO_ASSUMPTION,
 
+            // genhd.h
+            "set_capacity" => USE_SPINLOCK,
+            "device_add_disk" | "del_gendisk" | "put_disk" => MIGHT_SLEEP,
+
             // gfp.h
+            "alloc_pages" => MIGHT_SLEEP,
             "__free_pages" => USE_SPINLOCK,
+
+            // hrtimer.h
+            "hrtimer_setup" | "hrtimer_start_range_ns" => NO_ASSUMPTION,
+            "hrtimer_cancel" => MIGHT_SLEEP,
 
             // io.h
             // I/O functions do not sleep.
@@ -189,7 +234,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             | "readl_relaxed" | "readq_relaxed" | "writeb" | "writew" | "writel" | "writeq"
             | "writeb_relaxed" | "writew_relaxed" | "writel_relaxed" | "writeq_relaxed"
             | "memcpy_fromio" => NO_ASSUMPTION,
-            "ioremap" | "iounmap" => MIGHT_SLEEP,
+            "ioremap" | "ioremap_np" | "iounmap" => MIGHT_SLEEP,
 
             // irq.h
             "handle_level_irq" | "handle_edge_irq" | "handle_bad_irq" => NO_ASSUMPTION,
@@ -201,6 +246,13 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "__cant_sleep" => (0, ExpectationRange { lo: 1, hi: None }),
             "__might_sleep" => MIGHT_SLEEP,
 
+            // kunit
+            "kunit_get_current_test" | "kunit_unary_assert_format"
+            | "__kunit_do_failed_assertion" | "__kunit_abort" => NO_ASSUMPTION,
+
+            // list.h
+            "INIT_LIST_HEAD" | "list_add_tail" => NO_ASSUMPTION,
+
             // list_lru.h
             "list_lru_add" | "list_lru_add_obj" | "list_lru_del_obj" | "list_lru_walk" => {
                 USE_SPINLOCK
@@ -210,6 +262,15 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // lockdep.h
             "mutex_assert_is_held" => NO_ASSUMPTION,
             "spin_assert_is_held" => NO_ASSUMPTION,
+            "lockdep_register_key" => NO_ASSUMPTION,
+
+            // maple_tree.h
+            "mas_find" | "mtree_load" | "mt_init_flags" => NO_ASSUMPTION,
+            "mtree_insert_range" | "mtree_erase" | "mtree_alloc_range"
+            | "mtree_destroy" => MIGHT_SLEEP,
+
+            // mm.h
+            "is_vmalloc_addr" | "vmalloc_to_page" => NO_ASSUMPTION,
 
             // moduleparam.h
             "kernel_param_lock" => MIGHT_SLEEP,
@@ -220,9 +281,15 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "mutex_lock" => MIGHT_SLEEP,
             "mutex_unlock" => MIGHT_SLEEP,
 
+            // pci.h
+            "pci_iounmap" | "pci_release_region" => MIGHT_SLEEP,
+
             // printk.h
             // printk can be called from any context.
             "_printk" | "_dev_printk" | "rust_fmt_argument" => NO_ASSUMPTION,
+
+            // processor.h
+            "cpu_relax" => NO_ASSUMPTION,
 
             // property.h
             "fwnode_get_name" | "fwnode_count_parents" | "fwnode_get_name_prefix" => NO_ASSUMPTION,
@@ -244,7 +311,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "synchronize_rcu" => MIGHT_SLEEP,
 
             // refcount.h
-            "REFCOUNT_INIT" | "refcount_inc" | "refcount_dec_and_test" => NO_ASSUMPTION,
+            "REFCOUNT_INIT" | "refcount_set" | "refcount_inc"
+            | "refcount_dec_and_test" => NO_ASSUMPTION,
+
+            // regulator.h
+            "regulator_set_voltage" | "regulator_get_voltage" | "regulator_disable"
+            | "regulator_put" => MIGHT_SLEEP,
 
             // rwsem.h
             "__init_rwsem" => NO_ASSUMPTION,
@@ -252,17 +324,23 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "up_read" | "up_write" => MIGHT_SLEEP,
 
             // sched.h
-            "schedule" => MIGHT_SLEEP,
+            "schedule" | "schedule_timeout" | "might_resched" => MIGHT_SLEEP,
 
             // sched/signal.h
             "signal_pending" => NO_ASSUMPTION,
+
+            // sched/task.h
+            "get_task_struct" | "put_task_struct" => NO_ASSUMPTION,
+
+            // scatterlist.h
+            "sg_free_table" => USE_SPINLOCK,
 
             // seq_file.h
             "seq_printf" => NO_ASSUMPTION,
 
             // slab.h
-            // What krealloc does depend on flags. Assume it may sleep for conservative purpose.
-            "krealloc" => MIGHT_SLEEP,
+            "krealloc" | "krealloc_node_align" | "kvrealloc_node_align"
+            | "vrealloc_node_align" => MIGHT_SLEEP,
             "kfree" => USE_SPINLOCK,
             "slab_is_available" => NO_ASSUMPTION,
 
@@ -279,20 +357,31 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // timekeeping.h
             "ktime_get" => NO_ASSUMPTION,
 
+            // timer.h
+            "timer_init_key" | "delayed_work_timer_fn" => NO_ASSUMPTION,
+
             // uaccess.h
             // Userspace memory access might fault, and thus sleep.
             "copy_from_user" | "copy_to_user" | "clear_user" | "copy_from_iter"
             | "copy_to_iter" | "iov_iter_zero" => MIGHT_SLEEP,
 
             // wait.h
-            "init_wait" => NO_ASSUMPTION,
+            "init_wait" | "__init_waitqueue_head" => NO_ASSUMPTION,
             "prepare_to_wait_exclusive" | "finish_wait" => USE_SPINLOCK,
             "init_waitqueue_func_entry" => NO_ASSUMPTION,
             "add_wait_queue" | "remove_wait_queue" => USE_SPINLOCK,
 
             // workqueue.h
-            "__INIT_WORK_WITH_KEY" | "queue_work_on" => NO_ASSUMPTION,
+            "__INIT_WORK_WITH_KEY" | "init_work_with_key" | "queue_work_on"
+            | "queue_delayed_work_on" => NO_ASSUMPTION,
             "destroy_workqueue" => MIGHT_SLEEP,
+
+            // xarray.h
+            "xa_init_flags" | "xa_load" | "xa_err" | "xa_find"
+            | "xa_find_after" => NO_ASSUMPTION,
+            "__xa_store" | "__xa_erase" | "xa_destroy" => USE_SPINLOCK,
+            "xa_lock" => SPIN_LOCK,
+            "xa_unlock" => SPIN_UNLOCK,
 
             f if f.starts_with("rust_do_trace") => NO_ASSUMPTION,
 
