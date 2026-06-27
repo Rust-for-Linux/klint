@@ -137,7 +137,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                 let callee_ty = self.instance.instantiate_mir_and_normalize_erasing_regions(
                     self.checker.tcx,
                     self.typing_env,
-                    ty::EarlyBinder::bind(callee_ty),
+                    ty::EarlyBinder::bind(self.checker.tcx, callee_ty),
                 );
                 if let ty::FnDef(def_id, args) = *callee_ty.kind() {
                     if let Some(v) = self.checker.preemption_count_annotation(def_id).adjustment {
@@ -176,7 +176,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                 let ty = self.instance.instantiate_mir_and_normalize_erasing_regions(
                     self.checker.tcx,
                     self.typing_env,
-                    ty::EarlyBinder::bind(ty),
+                    ty::EarlyBinder::bind(self.checker.tcx, ty),
                 );
 
                 self.checker.call_stack.borrow_mut().push(UseSite {

@@ -32,7 +32,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
         self.instance.instantiate_mir_and_normalize_erasing_regions(
             self.cx.tcx,
             self.typing_env,
-            ty::EarlyBinder::bind(v),
+            ty::EarlyBinder::bind(self.cx.tcx, v),
         )
     }
 
@@ -736,7 +736,7 @@ memoize!(
 
         assert!(matches!(
             instance.def,
-            ty::InstanceKind::DropGlue(_, Some(_))
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(_)))
         ));
 
         if cx
@@ -776,8 +776,8 @@ memoize!(
             // Rust built-in intrinsics does not refer to anything else.
             ty::InstanceKind::Intrinsic(_) => return Ok(()),
             // Empty drop glue, then it is a no-op.
-            ty::InstanceKind::DropGlue(_, None) => return Ok(()),
-            ty::InstanceKind::DropGlue(_, Some(ty)) => {
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => return Ok(()),
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {
                 return cx.drop_check(typing_env.as_query_input(ty));
             }
             // Can't check further here. Will be checked at vtable generation site.

@@ -146,7 +146,7 @@ pub fn build_drop_shim<'tcx>(
     // TODO: Replicate coroutine handling in rustc_mir_transform/shim.rs
     if let ty::Coroutine(gen_def_id, args) = ty.kind() {
         let body = cx.analysis_mir(*gen_def_id).coroutine_drop().unwrap();
-        let body = EarlyBinder::bind(body.clone()).instantiate(cx.tcx, args);
+        let body = EarlyBinder::bind(cx.tcx, body.clone()).instantiate(cx.tcx, args);
         return body.skip_norm_wip();
     }
 
@@ -193,20 +193,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     _ => self.analysis_mir(did),
                 }
             }
-            ty::InstanceKind::VTableShim(..)
-            | ty::InstanceKind::ReifyShim(..)
-            | ty::InstanceKind::Intrinsic(..)
-            | ty::InstanceKind::FnPtrShim(..)
-            | ty::InstanceKind::Virtual(..)
-            | ty::InstanceKind::ClosureOnceShim { .. }
-            | ty::InstanceKind::ConstructCoroutineInClosureShim { .. }
-            | ty::InstanceKind::DropGlue(..)
-            | ty::InstanceKind::CloneShim(..)
-            | ty::InstanceKind::ThreadLocalShim(..)
-            | ty::InstanceKind::FutureDropPollShim(..)
-            | ty::InstanceKind::FnPtrAddrShim(..)
-            | ty::InstanceKind::AsyncDropGlueCtorShim(..)
-            | ty::InstanceKind::AsyncDropGlue(..) => self.mir_shims(instance),
+            ty::InstanceKind::Intrinsic(..) => bug!("intrinsics have no instance MIR"),
+            ty::InstanceKind::Virtual(..) => bug!("virtual dispatches have no instance MIR"),
+            ty::InstanceKind::Shim(shim) => self.mir_shims(shim),
         }
     }
 }

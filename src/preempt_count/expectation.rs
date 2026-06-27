@@ -35,7 +35,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 let callee_ty = instance.instantiate_mir_and_normalize_erasing_regions(
                     self.tcx,
                     typing_env,
-                    ty::EarlyBinder::bind(callee_ty),
+                    ty::EarlyBinder::bind(self.tcx, callee_ty),
                 );
                 if let ty::FnDef(def_id, args) = *callee_ty.kind() {
                     if let Some(v) = self.preemption_count_annotation(def_id).expectation {
@@ -65,7 +65,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 let ty = instance.instantiate_mir_and_normalize_erasing_regions(
                     self.tcx,
                     typing_env,
-                    ty::EarlyBinder::bind(ty),
+                    ty::EarlyBinder::bind(self.tcx, ty),
                 );
 
                 self.call_stack.borrow_mut().push(UseSite {
@@ -133,7 +133,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let callee_ty = instance.instantiate_mir_and_normalize_erasing_regions(
                         self.tcx,
                         typing_env,
-                        ty::EarlyBinder::bind(callee_ty),
+                        ty::EarlyBinder::bind(self.tcx, callee_ty),
                     );
                     if let ty::FnDef(def_id, args) = *callee_ty.kind() {
                         if let Some(v) = self.preemption_count_annotation(def_id).expectation {
@@ -221,7 +221,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let ty = instance.instantiate_mir_and_normalize_erasing_regions(
                         self.tcx,
                         typing_env,
-                        ty::EarlyBinder::bind(ty),
+                        ty::EarlyBinder::bind(self.tcx, ty),
                     );
 
                     self.call_stack.borrow_mut().push(UseSite {
@@ -269,8 +269,8 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceKind::Intrinsic(_) => unreachable!(),
             // Empty drop glue, then it definitely won't mess with preemption count.
-            ty::InstanceKind::DropGlue(_, None) => unreachable!(),
-            ty::InstanceKind::DropGlue(_, Some(ty)) => {
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => unreachable!(),
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {
                 return self.report_drop_expectation_error(typing_env, ty, expected, span, diag);
             }
             // Checked by indirect checks
@@ -551,7 +551,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     let ty = instance.instantiate_mir_and_normalize_erasing_regions(
                         self.tcx,
                         typing_env,
-                        ty::EarlyBinder::bind(ty),
+                        ty::EarlyBinder::bind(self.tcx, ty),
                     );
                     diag.span_label(span, format!("the type being dropped is `{ty}`"));
                 }
@@ -767,7 +767,7 @@ memoize!(
 
         assert!(matches!(
             instance.def,
-            ty::InstanceKind::DropGlue(_, Some(_))
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(_)))
         ));
 
         if cx
@@ -893,7 +893,7 @@ memoize!(
 
         assert!(matches!(
             instance.def,
-            ty::InstanceKind::DropGlue(_, Some(_))
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(_)))
         ));
 
         let mir = crate::mir::build_drop_shim(cx, instance.def_id(), typing_env, ty);
@@ -931,8 +931,10 @@ memoize!(
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceKind::Intrinsic(_) => return Ok(ExpectationRange::top()),
             // Empty drop glue, then it definitely won't mess with preemption count.
-            ty::InstanceKind::DropGlue(_, None) => return Ok(ExpectationRange::top()),
-            ty::InstanceKind::DropGlue(_, Some(ty)) => {
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => {
+                return Ok(ExpectationRange::top());
+            }
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {
                 return cx.drop_expectation(typing_env.as_query_input(ty));
             }
             ty::InstanceKind::Virtual(def_id, _) => {
@@ -1098,8 +1100,8 @@ memoize!(
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceKind::Intrinsic(_) => return Ok(()),
             // Empty drop glue, then it definitely won't mess with preemption count.
-            ty::InstanceKind::DropGlue(_, None) => return Ok(()),
-            ty::InstanceKind::DropGlue(_, Some(ty)) => {
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => return Ok(()),
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {
                 return cx.drop_expectation_check(typing_env.as_query_input(ty));
             }
             // Checked by indirect checks

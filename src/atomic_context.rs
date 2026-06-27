@@ -5,7 +5,7 @@
 use rustc_hir::def_id::LocalDefId;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mono::MonoItem;
-use rustc_middle::ty::{GenericArgs, Instance, InstanceKind, TyCtxt, TypingEnv};
+use rustc_middle::ty::{self, GenericArgs, Instance, InstanceKind, TyCtxt, TypingEnv};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
 use rustc_span::Span;
 
@@ -552,7 +552,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
 
         for mono_item in mono_items {
             if let MonoItem::Fn(instance) = mono_item {
-                if let InstanceKind::DropGlue(_, Some(ty)) = instance.def
+                if let InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) = instance.def
                     && ty.is_slice()
                 {
                     // Rust will lower `[T; N]` drop to a glue that calls `[T]`. This turns fixed

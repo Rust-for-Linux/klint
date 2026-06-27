@@ -288,7 +288,7 @@ fn collect_items_rec<'tcx>(
                     used_items.push(respan(
                         starting_item.span,
                         MonoItem::Fn(Instance {
-                            def: InstanceKind::ThreadLocalShim(def_id),
+                            def: InstanceKind::Shim(ty::ShimKind::ThreadLocal(def_id)),
                             args: GenericArgs::empty(),
                         }),
                     ));
@@ -531,7 +531,7 @@ impl<'a, 'tcx> MirUsedCollector<'a, 'tcx> {
         self.instance.instantiate_mir_and_normalize_erasing_regions(
             self.tcx,
             ty::TypingEnv::fully_monomorphized(),
-            ty::EarlyBinder::bind(value),
+            ty::EarlyBinder::bind(self.tcx, value),
         )
     }
 
@@ -857,10 +857,10 @@ fn visit_instance_use<'tcx>(
                 bug!("{:?} being reified", instance);
             }
         }
-        ty::InstanceKind::ThreadLocalShim(..) => {
+        ty::InstanceKind::Shim(ty::ShimKind::ThreadLocal(..)) => {
             bug!("{:?} being reified", instance);
         }
-        ty::InstanceKind::DropGlue(_, None) => {
+        ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => {
             // Don't need to emit noop drop glue if we are calling directly.
             //
             // Note that we also optimize away the call to visit_instance_use in vtable construction
@@ -869,18 +869,18 @@ fn visit_instance_use<'tcx>(
                 output.push(create_fn_mono_item(tcx, instance, source));
             }
         }
-        ty::InstanceKind::DropGlue(_, Some(_))
-        | ty::InstanceKind::FutureDropPollShim(..)
-        | ty::InstanceKind::AsyncDropGlue(_, _)
-        | ty::InstanceKind::AsyncDropGlueCtorShim(_, _)
-        | ty::InstanceKind::VTableShim(..)
-        | ty::InstanceKind::ReifyShim(..)
-        | ty::InstanceKind::ClosureOnceShim { .. }
-        | ty::InstanceKind::ConstructCoroutineInClosureShim { .. }
-        | ty::InstanceKind::Item(..)
-        | ty::InstanceKind::FnPtrShim(..)
-        | ty::InstanceKind::CloneShim(..)
-        | ty::InstanceKind::FnPtrAddrShim(..) => {
+        ty::InstanceKind::Item(..)
+        | ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(_)))
+        | ty::InstanceKind::Shim(ty::ShimKind::FutureDropPoll(..))
+        | ty::InstanceKind::Shim(ty::ShimKind::AsyncDropGlue(_, _))
+        | ty::InstanceKind::Shim(ty::ShimKind::AsyncDropGlueCtor(_, _))
+        | ty::InstanceKind::Shim(ty::ShimKind::VTable(..))
+        | ty::InstanceKind::Shim(ty::ShimKind::Reify(..))
+        | ty::InstanceKind::Shim(ty::ShimKind::ClosureOnce { .. })
+        | ty::InstanceKind::Shim(ty::ShimKind::ConstructCoroutineInClosure { .. })
+        | ty::InstanceKind::Shim(ty::ShimKind::FnPtr(..))
+        | ty::InstanceKind::Shim(ty::ShimKind::Clone(..))
+        | ty::InstanceKind::Shim(ty::ShimKind::FnPtrAddr(..)) => {
             output.push(create_fn_mono_item(tcx, instance, source));
         }
     }

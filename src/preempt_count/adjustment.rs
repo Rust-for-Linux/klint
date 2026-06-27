@@ -428,7 +428,7 @@ memoize!(
 
         assert!(matches!(
             instance.def,
-            ty::InstanceKind::DropGlue(_, Some(_))
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(_)))
         ));
 
         if cx
@@ -549,7 +549,7 @@ memoize!(
 
         assert!(matches!(
             instance.def,
-            ty::InstanceKind::DropGlue(_, Some(_))
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(_)))
         ));
 
         let mir = crate::mir::build_drop_shim(cx, instance.def_id(), typing_env, ty);
@@ -586,8 +586,8 @@ memoize!(
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceKind::Intrinsic(_) => return Ok(0),
             // Empty drop glue, then it definitely won't mess with preemption count.
-            ty::InstanceKind::DropGlue(_, None) => return Ok(0),
-            ty::InstanceKind::DropGlue(_, Some(ty)) => {
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => return Ok(0),
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {
                 return cx.drop_adjustment(typing_env.as_query_input(ty));
             }
             ty::InstanceKind::Virtual(def_id, _) => {
@@ -752,8 +752,8 @@ memoize!(
             // No Rust built-in intrinsics will mess with preemption count.
             ty::InstanceKind::Intrinsic(_) => return Ok(()),
             // Empty drop glue, then it definitely won't mess with preemption count.
-            ty::InstanceKind::DropGlue(_, None) => return Ok(()),
-            ty::InstanceKind::DropGlue(_, Some(ty)) => {
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => return Ok(()),
+            ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {
                 return cx.drop_adjustment_check(typing_env.as_query_input(ty));
             }
             // Checked by indirect checks

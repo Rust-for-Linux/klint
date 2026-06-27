@@ -106,7 +106,7 @@ pub fn recover_fn_call_span<'tcx>(
                 let callee_ty = caller.instantiate_mir_and_normalize_erasing_regions(
                     tcx,
                     ty::TypingEnv::fully_monomorphized(),
-                    ty::EarlyBinder::bind(callee_ty),
+                    ty::EarlyBinder::bind(tcx, callee_ty),
                 );
 
                 let ty::FnDef(def_id, args) = *callee_ty.kind() else {
@@ -132,7 +132,7 @@ pub fn recover_fn_call_span<'tcx>(
                 let ty = caller.instantiate_mir_and_normalize_erasing_regions(
                     tcx,
                     ty::TypingEnv::fully_monomorphized(),
-                    ty::EarlyBinder::bind(ty),
+                    ty::EarlyBinder::bind(tcx, ty),
                 );
 
                 let instance = Instance::resolve_drop_glue(tcx, ty);
@@ -183,7 +183,7 @@ pub fn recover_fn_call_span<'tcx>(
             let instance = caller.instantiate_mir_and_normalize_erasing_regions(
                 tcx,
                 ty::TypingEnv::fully_monomorphized(),
-                ty::EarlyBinder::bind(instance),
+                ty::EarlyBinder::bind(tcx, instance),
             );
 
             if tcx.symbol_name(instance).name != callee {
