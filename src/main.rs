@@ -115,21 +115,21 @@ impl Callbacks for MyCallbacks {
                 hir_lints::not_using_prelude::NOT_USING_PRELUDE,
             ]);
 
-            lint_store.register_late_pass(Box::new(|tcx| {
+            lint_store.register_late_lint_pass(Box::new(|tcx| {
                 Box::new(hir_lints::c_str_literal::CStrLiteralLint {
                     cx: driver::cx::<MyCallbacks>(tcx),
                 })
             }));
 
-            lint_store.register_late_pass(Box::new(|tcx| {
+            lint_store.register_late_lint_pass(Box::new(|tcx| {
                 Box::new(hir_lints::not_using_prelude::NotUsingPrelude {
                     cx: driver::cx::<MyCallbacks>(tcx),
                 })
             }));
 
             // lint_store
-            //     .register_late_pass(Box::new(|_| Box::new(infallible_allocation::InfallibleAllocation)));
-            lint_store.register_late_pass(Box::new(|tcx| {
+            //     .register_late_lint_pass(Box::new(|_| Box::new(infallible_allocation::InfallibleAllocation)));
+            lint_store.register_late_lint_pass(Box::new(|tcx| {
                 Box::new(atomic_context::AtomicContext {
                     cx: driver::cx::<MyCallbacks>(tcx),
                 })
