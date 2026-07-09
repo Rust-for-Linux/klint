@@ -1,7 +1,7 @@
 warning: converting this function to pointer may result in preemption count rule violation
-  --> $DIR/function-pointer.rs:24:19
+  --> $DIR/function-pointer.rs:22:19
    |
-24 |     let a: fn() = not_okay;
+22 |     let a: fn() = not_okay;
    |                   ^^^^^^^^
    |
    = help: `not_okay` is being converted to a pointer

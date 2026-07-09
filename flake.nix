@@ -6,6 +6,10 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -13,6 +17,7 @@
       nixpkgs,
       flake-utils,
       rust-overlay,
+      treefmt-nix,
       ...
     }:
     flake-utils.lib.eachDefaultSystem (
@@ -85,15 +90,15 @@
           };
 
           update-rustc = {
-              type = "app";
-              program = "${pkgs.writers.writeBash "update-rustc" ''
-                nix flake update
-                sed -i "s/channel = .*/channel = \"$(nix run .#latest-rustc)\"/" rust-toolchain.toml
-              ''}";
+            type = "app";
+            program = "${pkgs.writers.writeBash "update-rustc" ''
+              nix flake update
+              sed -i "s/channel = .*/channel = \"$(nix run .#latest-rustc)\"/" rust-toolchain.toml
+            ''}";
           };
         };
 
-        formatter = pkgs.nixfmt-tree;
+        formatter = (treefmt-nix.lib.evalModule pkgs ./treefmt.nix).config.build.wrapper;
       }
     );
 }

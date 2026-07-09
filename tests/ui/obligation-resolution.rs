@@ -13,16 +13,13 @@ pub trait Pattern: Sized {
 }
 
 #[doc(hidden)]
-trait MultiCharEq {
-}
+trait MultiCharEq {}
 
-impl<const N: usize> MultiCharEq for [char; N] {
-}
+impl<const N: usize> MultiCharEq for [char; N] {}
 
 struct MultiCharEqPattern<C: MultiCharEq>(C);
 
-impl<C: MultiCharEq> Pattern for MultiCharEqPattern<C> {
-}
+impl<C: MultiCharEq> Pattern for MultiCharEqPattern<C> {}
 
 impl<const N: usize> Pattern for [char; N] {
     #[inline]

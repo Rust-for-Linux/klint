@@ -151,7 +151,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             f if f.starts_with("atomic") => NO_ASSUMPTION,
 
             // bitops.h
-            "__clear_bit" | "__set_bit" | "_find_next_bit" | "_find_next_zero_bit"
+            "__clear_bit"
+            | "__set_bit"
+            | "_find_next_bit"
+            | "_find_next_zero_bit"
             | "_find_last_bit" => NO_ASSUMPTION,
 
             // bitmap.h
@@ -183,12 +186,16 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
             // cpufreq.h
             "cpufreq_generic_frequency_table_verify" | "cpufreq_generic_get" => NO_ASSUMPTION,
-            "cpufreq_generic_suspend" | "cpufreq_register_driver"
-            | "cpufreq_unregister_driver" => MIGHT_SLEEP,
+            "cpufreq_generic_suspend" | "cpufreq_register_driver" | "cpufreq_unregister_driver" => {
+                MIGHT_SLEEP
+            }
 
             // cpumask.h
-            "cpumask_empty" | "__cpumask_set_cpu" | "__cpumask_clear_cpu"
-            | "cpumask_test_cpu" | "cpumask_weight" => NO_ASSUMPTION,
+            "cpumask_empty"
+            | "__cpumask_set_cpu"
+            | "__cpumask_clear_cpu"
+            | "cpumask_test_cpu"
+            | "cpumask_weight" => NO_ASSUMPTION,
 
             // current.h
             "get_current" => NO_ASSUMPTION,
@@ -247,8 +254,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "__might_sleep" => MIGHT_SLEEP,
 
             // kunit
-            "kunit_get_current_test" | "kunit_unary_assert_format"
-            | "__kunit_do_failed_assertion" | "__kunit_abort" => NO_ASSUMPTION,
+            "kunit_get_current_test"
+            | "kunit_unary_assert_format"
+            | "__kunit_do_failed_assertion"
+            | "__kunit_abort" => NO_ASSUMPTION,
 
             // list.h
             "INIT_LIST_HEAD" | "list_add_tail" => NO_ASSUMPTION,
@@ -266,8 +275,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 
             // maple_tree.h
             "mas_find" | "mtree_load" | "mt_init_flags" => NO_ASSUMPTION,
-            "mtree_insert_range" | "mtree_erase" | "mtree_alloc_range"
-            | "mtree_destroy" => MIGHT_SLEEP,
+            "mtree_insert_range" | "mtree_erase" | "mtree_alloc_range" | "mtree_destroy" => {
+                MIGHT_SLEEP
+            }
 
             // mm.h
             "is_vmalloc_addr" | "vmalloc_to_page" => NO_ASSUMPTION,
@@ -311,11 +321,14 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "synchronize_rcu" => MIGHT_SLEEP,
 
             // refcount.h
-            "REFCOUNT_INIT" | "refcount_set" | "refcount_inc"
-            | "refcount_dec_and_test" => NO_ASSUMPTION,
+            "REFCOUNT_INIT" | "refcount_set" | "refcount_inc" | "refcount_dec_and_test" => {
+                NO_ASSUMPTION
+            }
 
             // regulator.h
-            "regulator_set_voltage" | "regulator_get_voltage" | "regulator_disable"
+            "regulator_set_voltage"
+            | "regulator_get_voltage"
+            | "regulator_disable"
             | "regulator_put" => MIGHT_SLEEP,
 
             // rwsem.h
@@ -339,8 +352,9 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "seq_printf" => NO_ASSUMPTION,
 
             // slab.h
-            "krealloc" | "krealloc_node_align" | "kvrealloc_node_align"
-            | "vrealloc_node_align" => MIGHT_SLEEP,
+            "krealloc" | "krealloc_node_align" | "kvrealloc_node_align" | "vrealloc_node_align" => {
+                MIGHT_SLEEP
+            }
             "kfree" => USE_SPINLOCK,
             "slab_is_available" => NO_ASSUMPTION,
 
@@ -372,13 +386,14 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "add_wait_queue" | "remove_wait_queue" => USE_SPINLOCK,
 
             // workqueue.h
-            "__INIT_WORK_WITH_KEY" | "init_work_with_key" | "queue_work_on"
+            "__INIT_WORK_WITH_KEY"
+            | "init_work_with_key"
+            | "queue_work_on"
             | "queue_delayed_work_on" => NO_ASSUMPTION,
             "destroy_workqueue" => MIGHT_SLEEP,
 
             // xarray.h
-            "xa_init_flags" | "xa_load" | "xa_err" | "xa_find"
-            | "xa_find_after" => NO_ASSUMPTION,
+            "xa_init_flags" | "xa_load" | "xa_err" | "xa_find" | "xa_find_after" => NO_ASSUMPTION,
             "__xa_store" | "__xa_erase" | "xa_destroy" => USE_SPINLOCK,
             "xa_lock" => SPIN_LOCK,
             "xa_unlock" => SPIN_UNLOCK,

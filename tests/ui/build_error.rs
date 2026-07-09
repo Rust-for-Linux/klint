@@ -8,7 +8,7 @@ macro_rules! build_assert {
         if !$expr {
             rust_build_error();
         }
-    }
+    };
 }
 
 #[inline]

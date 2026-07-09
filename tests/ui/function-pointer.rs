@@ -5,9 +5,7 @@
 #[klint::preempt_count(adjust = 1, unchecked)]
 fn spin_lock() {}
 
-fn okay() {
-
-}
+fn okay() {}
 
 fn not_okay() {
     spin_lock();
