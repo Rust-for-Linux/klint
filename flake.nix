@@ -29,7 +29,8 @@
           inherit system overlays;
         };
 
-        rustc = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        toolchain = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml)).toolchain;
+        rustc = pkgs.rust-bin.fromRustupToolchain toolchain;
       in
       {
         devShells.rustup = pkgs.mkShell {
@@ -39,7 +40,11 @@
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [ sqlite ];
-          nativeBuildInputs = [ rustc ];
+          nativeBuildInputs = [
+            (pkgs.rust-bin.fromRustupToolchain (
+              toolchain // { components = toolchain.components ++ [ "rust-analyzer" ]; }
+            ))
+          ];
         };
 
         packages.default =
