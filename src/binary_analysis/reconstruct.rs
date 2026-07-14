@@ -117,7 +117,7 @@ pub fn recover_fn_call_span<'tcx>(
                     tcx,
                     ty::TypingEnv::fully_monomorphized(),
                     def_id,
-                    args,
+                    args.no_bound_vars().unwrap(),
                     terminator.source_info.span,
                 );
                 if tcx.symbol_name(instance).name != callee {

@@ -149,7 +149,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                             self.checker.tcx,
                             self.typing_env,
                             def_id,
-                            args,
+                            args.no_bound_vars().unwrap(),
                         )
                         .unwrap()
                         {

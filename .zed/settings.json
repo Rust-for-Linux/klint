@@ -1,4 +1,5 @@
 {
+  "preferred_line_length": 100,
   "lsp": {
     "rust-analyzer": {
       "initialization_options": {

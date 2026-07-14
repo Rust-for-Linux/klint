@@ -163,7 +163,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 let fn_ty = self.monomorphize(fn_ty);
                 if let ty::FnDef(def_id, args) = *fn_ty.kind() {
                     let instance =
-                        ty::Instance::try_resolve(self.cx.tcx, self.typing_env, def_id, args)
+                        ty::Instance::try_resolve(self.cx.tcx, self.typing_env, def_id, args.no_bound_vars().unwrap())
                             .unwrap()
                             .ok_or(Error::TooGeneric)?;
                     self.check_fn_pointer_cast(instance, span)?;
@@ -252,7 +252,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
 
                 if let ty::FnDef(def_id, args) = *callee_ty.kind() {
                     let instance =
-                        ty::Instance::try_resolve(self.cx.tcx, self.typing_env, def_id, args)
+                        ty::Instance::try_resolve(self.cx.tcx, self.typing_env, def_id, args.no_bound_vars().unwrap())
                             .unwrap()
                             .ok_or(Error::TooGeneric)?;
                     self.cx.call_stack.borrow_mut().push(UseSite {
@@ -290,7 +290,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                                     self.cx.tcx,
                                     self.typing_env,
                                     def_id,
-                                    args,
+                                    args.no_bound_vars().unwrap(),
                                 )
                                 .unwrap()
                                 .ok_or(Error::TooGeneric)?;

@@ -44,7 +44,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         v
                     } else {
                         let callee_instance =
-                            ty::Instance::try_resolve(self.tcx, typing_env, def_id, args)
+                            ty::Instance::try_resolve(self.tcx, typing_env, def_id, args.no_bound_vars().unwrap())
                                 .unwrap()
                                 .ok_or(Error::TooGeneric)?;
                         self.call_stack.borrow_mut().push(UseSite {
@@ -155,7 +155,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                             return Ok(());
                         } else {
                             let callee_instance =
-                                ty::Instance::try_resolve(self.tcx, typing_env, def_id, args)
+                                ty::Instance::try_resolve(self.tcx, typing_env, def_id, args.no_bound_vars().unwrap())
                                     .unwrap()
                                     .ok_or(Error::TooGeneric)?;
 
