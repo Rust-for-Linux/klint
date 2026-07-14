@@ -188,8 +188,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                     | DefKind::Static { .. }
                     | DefKind::AssocConst { .. }
                     | DefKind::Ctor(..)
-                    | DefKind::AnonConst
-                    | DefKind::InlineConst => self.mir_for_ctfe(did),
+                    | DefKind::AnonConst => self.mir_for_ctfe(did),
                     _ => self.analysis_mir(did),
                 }
             }
