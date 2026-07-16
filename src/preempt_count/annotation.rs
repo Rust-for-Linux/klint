@@ -56,10 +56,34 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 }
             }
 
+            if let Some(adt_def) = self_ty.skip_binder().ty_adt_def()
+                && let data = self.def_path(adt_def.did()).data
+                && data.len() > 1
+                && let DefPathData::TypeNs(crate::symbol::io) = data[0].data
+            {
+                // None of `core::io` is allowed to be used in the kernel, so don't check any.
+                return PreemptionCount {
+                    adjustment: Some(0),
+                    expectation: Some(super::ExpectationRange::top()),
+                    unchecked: true,
+                };
+            }
+
             return Default::default();
         }
 
         let data = self.def_path(def_id).data;
+
+        if data.len() > 1
+            && let DefPathData::TypeNs(crate::symbol::io) = data[0].data
+        {
+            // None of `core::io` is allowed to be used in the kernel, so don't check any.
+            return PreemptionCount {
+                adjustment: Some(0),
+                expectation: Some(super::ExpectationRange::top()),
+                unchecked: true,
+            };
+        }
 
         if data.len() == 3
             && let DefPathData::TypeNs(sym::any) = data[0].data

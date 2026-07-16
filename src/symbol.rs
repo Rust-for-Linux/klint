@@ -32,6 +32,7 @@ def! {
     dump_mir,
     adjust,
     unchecked,
+    io,
     Any,
     error,
     Error,
