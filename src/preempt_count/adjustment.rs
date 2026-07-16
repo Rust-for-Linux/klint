@@ -584,7 +584,7 @@ memoize!(
         } = poly_instance;
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
-            ty::InstanceKind::Intrinsic(_) => return Ok(0),
+            ty::InstanceKind::Intrinsic(_) | ty::InstanceKind::LlvmIntrinsic(_) => return Ok(0),
             // Empty drop glue, then it definitely won't mess with preemption count.
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => return Ok(0),
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {
@@ -750,7 +750,7 @@ memoize!(
 
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
-            ty::InstanceKind::Intrinsic(_) => return Ok(()),
+            ty::InstanceKind::Intrinsic(_) | ty::InstanceKind::LlvmIntrinsic(_) => return Ok(()),
             // Empty drop glue, then it definitely won't mess with preemption count.
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => return Ok(()),
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {

@@ -162,10 +162,14 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 let fn_ty = operand.ty(self.body, self.cx.tcx);
                 let fn_ty = self.monomorphize(fn_ty);
                 if let ty::FnDef(def_id, args) = *fn_ty.kind() {
-                    let instance =
-                        ty::Instance::try_resolve(self.cx.tcx, self.typing_env, def_id, args.no_bound_vars().unwrap())
-                            .unwrap()
-                            .ok_or(Error::TooGeneric)?;
+                    let instance = ty::Instance::try_resolve(
+                        self.cx.tcx,
+                        self.typing_env,
+                        def_id,
+                        args.no_bound_vars().unwrap(),
+                    )
+                    .unwrap()
+                    .ok_or(Error::TooGeneric)?;
                     self.check_fn_pointer_cast(instance, span)?;
                 }
             }
@@ -251,10 +255,14 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 let callee_ty = self.monomorphize(callee_ty);
 
                 if let ty::FnDef(def_id, args) = *callee_ty.kind() {
-                    let instance =
-                        ty::Instance::try_resolve(self.cx.tcx, self.typing_env, def_id, args.no_bound_vars().unwrap())
-                            .unwrap()
-                            .ok_or(Error::TooGeneric)?;
+                    let instance = ty::Instance::try_resolve(
+                        self.cx.tcx,
+                        self.typing_env,
+                        def_id,
+                        args.no_bound_vars().unwrap(),
+                    )
+                    .unwrap()
+                    .ok_or(Error::TooGeneric)?;
                     self.cx.call_stack.borrow_mut().push(UseSite {
                         instance: self.typing_env.as_query_input(self.instance),
                         kind: UseSiteKind::Call(span),
@@ -774,7 +782,7 @@ memoize!(
 
         match instance.def {
             // Rust built-in intrinsics does not refer to anything else.
-            ty::InstanceKind::Intrinsic(_) => return Ok(()),
+            ty::InstanceKind::Intrinsic(_) | ty::InstanceKind::LlvmIntrinsic(_) => return Ok(()),
             // Empty drop glue, then it is a no-op.
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => return Ok(()),
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {

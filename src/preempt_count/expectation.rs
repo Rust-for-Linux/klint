@@ -43,10 +43,14 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                         // This also avoids `TooGeneric` when def_id is an trait method.
                         v
                     } else {
-                        let callee_instance =
-                            ty::Instance::try_resolve(self.tcx, typing_env, def_id, args.no_bound_vars().unwrap())
-                                .unwrap()
-                                .ok_or(Error::TooGeneric)?;
+                        let callee_instance = ty::Instance::try_resolve(
+                            self.tcx,
+                            typing_env,
+                            def_id,
+                            args.no_bound_vars().unwrap(),
+                        )
+                        .unwrap()
+                        .ok_or(Error::TooGeneric)?;
                         self.call_stack.borrow_mut().push(UseSite {
                             instance: typing_env.as_query_input(instance),
                             kind: UseSiteKind::Call(terminator.source_info.span),
@@ -154,10 +158,14 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                             diag.note(format!("but the callee expects preemption count {}", v));
                             return Ok(());
                         } else {
-                            let callee_instance =
-                                ty::Instance::try_resolve(self.tcx, typing_env, def_id, args.no_bound_vars().unwrap())
-                                    .unwrap()
-                                    .ok_or(Error::TooGeneric)?;
+                            let callee_instance = ty::Instance::try_resolve(
+                                self.tcx,
+                                typing_env,
+                                def_id,
+                                args.no_bound_vars().unwrap(),
+                            )
+                            .unwrap()
+                            .ok_or(Error::TooGeneric)?;
 
                             if !span.has_primary_spans() {
                                 span = self.def_span(callee_instance.def_id()).into();
@@ -267,7 +275,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     ) -> Result<(), Error> {
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
-            ty::InstanceKind::Intrinsic(_) => unreachable!(),
+            ty::InstanceKind::Intrinsic(_) | ty::InstanceKind::LlvmIntrinsic(_) => unreachable!(),
             // Empty drop glue, then it definitely won't mess with preemption count.
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => unreachable!(),
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {
@@ -929,7 +937,9 @@ memoize!(
         } = poly_instance;
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
-            ty::InstanceKind::Intrinsic(_) => return Ok(ExpectationRange::top()),
+            ty::InstanceKind::Intrinsic(_) | ty::InstanceKind::LlvmIntrinsic(_) => {
+                return Ok(ExpectationRange::top());
+            }
             // Empty drop glue, then it definitely won't mess with preemption count.
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => {
                 return Ok(ExpectationRange::top());
@@ -1098,7 +1108,7 @@ memoize!(
 
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
-            ty::InstanceKind::Intrinsic(_) => return Ok(()),
+            ty::InstanceKind::Intrinsic(_) | ty::InstanceKind::LlvmIntrinsic(_) => return Ok(()),
             // Empty drop glue, then it definitely won't mess with preemption count.
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, None)) => return Ok(()),
             ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, Some(ty))) => {
