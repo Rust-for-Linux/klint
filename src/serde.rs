@@ -7,7 +7,7 @@ use std::sync::Arc;
 use rustc_data_structures::fx::{FxHashMap, FxIndexSet};
 use rustc_middle::mir::interpret::{self, AllocDecodingState, AllocId};
 use rustc_middle::ty::codec::{TyDecoder, TyEncoder};
-use rustc_middle::ty::{self, Ty, TyCtxt};
+use rustc_middle::ty::{self, InternerDecoder, Ty, TyCtxt};
 use rustc_serialize::opaque::{MAGIC_END_BYTES, MemDecoder};
 use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_session::StableCrateId;
@@ -350,13 +350,17 @@ impl<'a, 'tcx> Decoder for DecodeContext<'a, 'tcx> {
     }
 }
 
-impl<'a, 'tcx> TyDecoder<'tcx> for DecodeContext<'a, 'tcx> {
-    const CLEAR_CROSS_CRATE: bool = true;
+impl<'a, 'tcx> InternerDecoder for DecodeContext<'a, 'tcx> {
+    type Interner = TyCtxt<'tcx>;
 
     #[inline]
     fn interner(&self) -> TyCtxt<'tcx> {
         self.tcx
     }
+}
+
+impl<'a, 'tcx> TyDecoder<'tcx> for DecodeContext<'a, 'tcx> {
+    const CLEAR_CROSS_CRATE: bool = true;
 
     fn cached_ty_for_shorthand<F>(&mut self, shorthand: usize, or_insert_with: F) -> Ty<'tcx>
     where
