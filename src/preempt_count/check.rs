@@ -511,17 +511,17 @@ memoize!(
             assert!(!poly_trait_ref.has_escaping_bound_vars());
 
             let mut visited = PredicateSet::new(cx.tcx);
-            let predicate = poly_trait_ref.upcast(cx.tcx);
+            let clause = poly_trait_ref.upcast(cx.tcx);
             let mut stack: Vec<ty::PolyTraitRef<'tcx>> = vec![poly_trait_ref];
-            visited.insert(predicate);
+            visited.insert(clause);
 
             while let Some(trait_ref) = stack.pop() {
                 let super_traits = cx
-                    .explicit_super_predicates_of(trait_ref.def_id())
+                    .explicit_super_clauses_of(trait_ref.def_id())
                     .iter_identity_copied()
                     .map(Unnormalized::skip_norm_wip)
-                    .filter_map(|(pred, _)| {
-                        pred.instantiate_supertrait(cx.tcx, trait_ref)
+                    .filter_map(|(clause, _)| {
+                        clause.instantiate_supertrait(cx.tcx, trait_ref)
                             .as_trait_clause()
                     });
                 for supertrait in super_traits {
@@ -543,11 +543,11 @@ memoize!(
                     });
                     let args = cx.normalize_erasing_late_bound_regions(typing_env, args);
 
-                    let predicates = cx.predicates_of(entry).instantiate_own(cx.tcx, args);
-                    if rustc_trait_selection::traits::impossible_predicates(
+                    let clauses = cx.clauses_of(entry).instantiate_own(cx.tcx, args);
+                    if rustc_trait_selection::traits::impossible_clauses(
                         cx.tcx,
-                        predicates
-                            .map(|(predicate, _)| predicate.skip_norm_wip())
+                        clauses
+                            .map(|(clause, _)| clause.skip_norm_wip())
                             .collect(),
                     ) {
                         continue;

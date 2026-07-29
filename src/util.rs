@@ -8,14 +8,14 @@ use rustc_middle::ty::TypeVisitableExt;
 
 pub fn fn_has_unsatisfiable_preds(cx: &LateContext<'_>, did: DefId) -> bool {
     use rustc_trait_selection::traits;
-    let predicates = cx
+    let clauses = cx
         .tcx
-        .predicates_of(did)
-        .predicates
+        .clauses_of(did)
+        .clauses
         .iter()
-        .filter_map(|(p, _)| if p.is_global() { Some(*p) } else { None });
-    traits::impossible_predicates(
+        .filter_map(|(c, _)| if c.is_global() { Some(*c) } else { None });
+    traits::impossible_clauses(
         cx.tcx,
-        traits::elaborate(cx.tcx, predicates).collect::<Vec<_>>(),
+        traits::elaborate(cx.tcx, clauses).collect::<Vec<_>>(),
     )
 }

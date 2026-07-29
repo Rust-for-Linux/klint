@@ -13,11 +13,11 @@ where
         write!(f, "{}", value)?;
         if !typing_env.param_env.caller_bounds().is_empty() {
             write!(f, " where ")?;
-            for (i, predicate) in typing_env.param_env.caller_bounds().iter().enumerate() {
+            for (i, clause) in typing_env.param_env.caller_bounds().iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "{}", predicate)?;
+                write!(f, "{}", clause)?;
             }
         }
         Ok(())
