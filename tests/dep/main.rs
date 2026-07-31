@@ -8,9 +8,13 @@ use std::sync::LazyLock;
 
 static PROFILE_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     let current_exe_path = env::current_exe().unwrap();
-    let deps_path = current_exe_path.parent().unwrap();
-    let profile_path = deps_path.parent().unwrap();
-    profile_path.into()
+    let components: Vec<_> = current_exe_path.components().collect();
+    let target_idx = components
+        .iter()
+        .rposition(|x| x.as_os_str() == "target")
+        .unwrap();
+    let profile_path = components[..=target_idx + 1].iter().collect();
+    profile_path
 });
 
 #[test]

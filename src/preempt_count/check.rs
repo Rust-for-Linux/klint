@@ -521,7 +521,8 @@ memoize!(
                     .iter_identity_copied()
                     .map(Unnormalized::skip_norm_wip)
                     .filter_map(|(clause, _)| {
-                        clause.instantiate_supertrait(cx.tcx, trait_ref)
+                        clause
+                            .instantiate_supertrait(cx.tcx, trait_ref)
                             .as_trait_clause()
                     });
                 for supertrait in super_traits {
@@ -546,9 +547,7 @@ memoize!(
                     let clauses = cx.clauses_of(entry).instantiate_own(cx.tcx, args);
                     if rustc_trait_selection::traits::impossible_clauses(
                         cx.tcx,
-                        clauses
-                            .map(|(clause, _)| clause.skip_norm_wip())
-                            .collect(),
+                        clauses.map(|(clause, _)| clause.skip_norm_wip()).collect(),
                     ) {
                         continue;
                     }
