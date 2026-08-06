@@ -17,7 +17,7 @@ use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::util::Providers;
 use rustc_session::config::{OutputFilenames, OutputType, PrintRequest};
-use rustc_session::{EarlyDiagCtxt, Session};
+use rustc_session::{EarlyDiagCtxt, IncrCompSession, Session};
 
 pub trait CallbacksExt: Callbacks + Send + 'static {
     type ExtCtxt<'tcx>: DynSend + DynSync;
@@ -149,9 +149,13 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
 
         let crate_info = CrateInfo::new(tcx, self.backend.target_cpu(tcx.sess));
 
-        let (cg, work_map) =
-            self.backend
-                .join_codegen(ongoing_codegen, tcx.sess, outputs, &crate_info);
+        let (cg, work_map) = self.backend.join_codegen(
+            ongoing_codegen,
+            tcx.sess,
+            tcx.incr_comp_session,
+            outputs,
+            &crate_info,
+        );
 
         self.callback.lock().unwrap().after_codegen(cx::<C>(tcx));
 
@@ -169,6 +173,7 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
         &self,
         ongoing_codegen: Box<dyn Any>,
         _sess: &Session,
+        _incr_comp_session: Option<&IncrCompSession>,
         _outputs: &OutputFilenames,
         _crate_info: &CrateInfo,
     ) -> (CompiledModules, UnordMap<WorkProductId, WorkProduct>) {
