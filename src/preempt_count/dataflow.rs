@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use rustc_middle::mir::{BasicBlock, Body, TerminatorEdges, TerminatorKind};
+use rustc_middle::mir::{BasicBlock, Body, TerminatorKind};
 use rustc_middle::ty::{self, Instance, TypingEnv};
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_mir_dataflow::lattice::FlatSet;
@@ -121,14 +121,14 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
         state: &mut Self::Domain,
         terminator: &'mir rustc_middle::mir::Terminator<'tcx>,
         location: rustc_middle::mir::Location,
-    ) -> TerminatorEdges<'mir, 'tcx> {
+    )  {
         // Skip all unwinding paths.
         if self.body.basic_blocks[location.block].is_cleanup {
-            return terminator.edges();
+            return;
         }
 
         let MaybeError::Ok(bounds) = state else {
-            return terminator.edges();
+            return;
         };
 
         let adjustment = match &terminator.kind {
@@ -192,7 +192,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
                 self.checker.call_stack.borrow_mut().pop();
                 result
             }
-            _ => return terminator.edges(),
+            _ => return,
         };
 
         let adjustment = match adjustment {
@@ -200,7 +200,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
             Err(e) => {
                 // Too generic, need to bail out and retry after monomorphization.
                 *state = MaybeError::Err(e);
-                return terminator.edges();
+                return;
             }
         };
 
@@ -209,7 +209,6 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
             FlatSet::Elem(v) => FlatSet::Elem(v + adjustment),
             FlatSet::Top => FlatSet::Top,
         };
-        terminator.edges()
     }
 
     fn apply_call_return_effect(
