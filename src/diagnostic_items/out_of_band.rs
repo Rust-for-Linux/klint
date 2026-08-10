@@ -1,8 +1,8 @@
 //! Out-of-band attributes attached without source code changes.
 
+use rustc_attr_ir::diagnostic_items::DiagnosticItems;
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::{CRATE_DEF_ID, DefId, LOCAL_CRATE};
-use rustc_hir::diagnostic_items::DiagnosticItems;
 use rustc_middle::middle::exported_symbols::ExportedSymbol;
 use rustc_middle::ty::TyCtxt;
 

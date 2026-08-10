@@ -2,10 +2,10 @@ mod out_of_band;
 
 use std::sync::Arc;
 
+use rustc_attr_ir::diagnostic_items::DiagnosticItems;
 use rustc_data_structures::fx::FxIndexMap;
 use rustc_hir::CRATE_OWNER_ID;
 use rustc_hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
-use rustc_hir::diagnostic_items::DiagnosticItems;
 use rustc_middle::ty::TyCtxt;
 use rustc_serialize::{Decodable, Encodable};
 use rustc_span::{Span, Symbol};

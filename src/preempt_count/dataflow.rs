@@ -121,7 +121,7 @@ impl<'tcx> Analysis<'tcx> for AdjustmentComputation<'_, 'tcx, '_> {
         state: &mut Self::Domain,
         terminator: &'mir rustc_middle::mir::Terminator<'tcx>,
         location: rustc_middle::mir::Location,
-    )  {
+    ) {
         // Skip all unwinding paths.
         if self.body.basic_blocks[location.block].is_cleanup {
             return;

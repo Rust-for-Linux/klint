@@ -3,8 +3,8 @@
 //! For example, when giving context about why a specific instance is used, a call stack (or rather, use stack,
 //! as some usage may be due to pointer coercion or static reference).
 
+use rustc_attr_ir::lang_items::LangItem;
 use rustc_errors::{Diag, EmissionGuarantee, MultiSpan};
-use rustc_hir::LangItem;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::{GenericArgs, Instance, PseudoCanonicalInput, TypingEnv};
 use rustc_span::{Span, sym};
