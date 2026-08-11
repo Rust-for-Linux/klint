@@ -211,9 +211,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
             }
             GlobalAlloc::Memory(alloc) => {
                 for inner in alloc.inner().provenance().provenances() {
-                    rustc_data_structures::stack::ensure_sufficient_stack(|| {
-                        self.check_alloc(inner.alloc_id(), span)
-                    })?;
+                    self.check_alloc(inner.alloc_id(), span)?;
                 }
             }
             GlobalAlloc::Function { instance, .. } => {
@@ -437,9 +435,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             )));
         }
 
-        rustc_data_structures::stack::ensure_sufficient_stack(|| {
-            self.do_indirect_check(typing_env, instance, body)
-        })
+        self.do_indirect_check(typing_env, instance, body)
     }
 }
 

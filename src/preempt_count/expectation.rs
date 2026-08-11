@@ -595,9 +595,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             )));
         }
 
-        rustc_data_structures::stack::ensure_sufficient_stack(|| {
-            self.do_infer_expectation(typing_env, instance, body)
-        })
+        self.do_infer_expectation(typing_env, instance, body)
     }
 }
 

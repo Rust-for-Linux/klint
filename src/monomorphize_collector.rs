@@ -312,11 +312,9 @@ fn collect_items_rec<'tcx>(
                 recursion_limit,
             ));
 
-            rustc_data_structures::stack::ensure_sufficient_stack(|| {
-                let (used, mentioned) = items_of_instance(tcx, (instance, mode));
-                used_items.extend(used.into_iter().copied());
-                mentioned_items.extend(mentioned.into_iter().copied());
-            });
+            let (used, mentioned) = items_of_instance(tcx, (instance, mode));
+            used_items.extend(used.into_iter().copied());
+            mentioned_items.extend(mentioned.into_iter().copied());
         }
 
         MonoItem::GlobalAsm(item_id) => {
@@ -1056,11 +1054,9 @@ fn collect_alloc<'tcx>(tcx: TyCtxt<'tcx>, alloc_id: AllocId, output: &mut MonoIt
             let ptrs = alloc.inner().provenance().ptrs();
             // avoid `ensure_sufficient_stack` in the common case of "no pointers"
             if !ptrs.is_empty() {
-                rustc_data_structures::stack::ensure_sufficient_stack(move || {
-                    for &prov in ptrs.values() {
-                        collect_alloc(tcx, prov.alloc_id(), output);
-                    }
-                });
+                for &prov in ptrs.values() {
+                    collect_alloc(tcx, prov.alloc_id(), output);
+                }
             }
         }
         GlobalAlloc::Function { instance, .. } => {
