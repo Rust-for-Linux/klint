@@ -3,9 +3,9 @@ use object::{Architecture, File, Object, ObjectSection, SectionKind};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::{Diag, Diagnostic, Level};
 use rustc_hir::CRATE_HIR_ID;
+use rustc_lint::declare_tool_lint;
 use rustc_middle::mono::MonoItem;
 use rustc_middle::ty::Instance;
-use rustc_session::declare_tool_lint;
 use rustc_span::{Span, Symbol, sym};
 
 use crate::ctxt::AnalysisCtxt;

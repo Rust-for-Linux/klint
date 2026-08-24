@@ -1,6 +1,5 @@
 use rustc_hir::Expr;
-use rustc_lint::{LateContext, LateLintPass, LintContext};
-use rustc_session::{declare_tool_lint, impl_lint_pass};
+use rustc_lint::{LateContext, LateLintPass, LintContext, declare_tool_lint, impl_lint_pass};
 use rustc_span::{self, Span, Symbol};
 
 use crate::ctxt::AnalysisCtxt;

@@ -10,7 +10,6 @@
 // * `Spanned<MonoItem>` is returned in `AccessMap` instead of just `MonoItem`.
 
 use rustc_attr_ir::lang_items::LangItem;
-use rustc_data_structures::Limit;
 use rustc_data_structures::fx::{FxHashMap, FxIndexMap};
 use rustc_data_structures::sync::{Lock, par_for_each_in};
 use rustc_data_structures::unord::UnordSet;
@@ -33,6 +32,7 @@ use rustc_middle::ty::{
 };
 use rustc_session::config::{DebugInfo, EntryFnType};
 use rustc_span::{DUMMY_SP, ErrorGuaranteed, Span, Spanned, dummy_spanned, respan};
+use rustc_structures::Limit;
 use rustc_trait_selection::traits;
 use std::cell::OnceCell;
 

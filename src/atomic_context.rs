@@ -3,10 +3,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use rustc_hir::def_id::LocalDefId;
-use rustc_lint::{LateContext, LateLintPass};
+use rustc_lint::{LateContext, LateLintPass, declare_tool_lint, impl_lint_pass};
 use rustc_middle::mono::MonoItem;
 use rustc_middle::ty::{self, GenericArgs, Instance, InstanceKind, TyCtxt, TypingEnv};
-use rustc_session::{declare_tool_lint, impl_lint_pass};
 use rustc_span::Span;
 
 use crate::ctxt::AnalysisCtxt;
@@ -420,7 +419,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         if self
             .cx
             .crate_types()
-            .contains(&rustc_session::config::CrateType::ProcMacro)
+            .contains(&rustc_structures::CrateType::ProcMacro)
         {
             return;
         }
@@ -529,7 +528,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         if self
             .cx
             .crate_types()
-            .contains(&rustc_session::config::CrateType::ProcMacro)
+            .contains(&rustc_structures::CrateType::ProcMacro)
         {
             return;
         }
@@ -554,7 +553,7 @@ impl<'tcx> LateLintPass<'tcx> for AtomicContext<'tcx> {
         if self
             .cx
             .crate_types()
-            .contains(&rustc_session::config::CrateType::ProcMacro)
+            .contains(&rustc_structures::CrateType::ProcMacro)
         {
             return;
         }

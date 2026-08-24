@@ -4,10 +4,9 @@
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_errors::{Diag, DiagCtxtHandle, Diagnostic, Level};
-use rustc_lint::{LateContext, LateLintPass, LintContext};
+use rustc_lint::{LateContext, LateLintPass, LintContext, declare_lint_pass, declare_tool_lint};
 use rustc_middle::mono::MonoItem;
 use rustc_middle::ty::Instance;
-use rustc_session::{declare_lint_pass, declare_tool_lint};
 use rustc_span::{Spanned, sym};
 
 use crate::monomorphize_collector::MonoItemCollectionStrategy;
