@@ -7,7 +7,7 @@ use rustc_hir::def_id::{CrateNum, DefId, DefIndex};
 use rustc_hir::definitions::DefPathData;
 use rustc_span::sym;
 
-use crate::attribute::PreemptionCount;
+use super::attribute::PreemptionCount;
 use crate::ctxt::AnalysisCtxt;
 
 impl<'tcx> AnalysisCtxt<'tcx> {

@@ -14,21 +14,17 @@ error: incorrect usage of `#[kint::preempt_count]`
   |
   = help: at least one of `adjust` or `expect` property must be specified
 
-error: incorrect usage of `#[kint::preempt_count]`
-  --> $DIR/annotation.rs:11:33
+error: expected expression, found end of attribute
+  --> $DIR/annotation.rs:11:32
    |
 11 | #[klint::preempt_count(adjust = )]
-   |                                 ^
-   |
-   = help: an integer expected
+   |                                ^ expected expression
 
-error: incorrect usage of `#[kint::preempt_count]`
-  --> $DIR/annotation.rs:14:33
+error: expected expression, found end of attribute
+  --> $DIR/annotation.rs:14:32
    |
 14 | #[klint::preempt_count(expect = )]
-   |                                 ^
-   |
-   = help: a range expected
+   |                                ^ expected expression
 
 error: incorrect usage of `#[kint::preempt_count]`
   --> $DIR/annotation.rs:20:23

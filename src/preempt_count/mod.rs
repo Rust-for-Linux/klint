@@ -4,6 +4,7 @@
 
 pub mod adjustment;
 pub mod annotation;
+pub(crate) mod attribute;
 pub mod check;
 pub mod dataflow;
 pub mod expectation;
