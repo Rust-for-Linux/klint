@@ -3,8 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 #![feature(rustc_private)]
-#![feature(box_patterns)]
-#![feature(never_type)]
+#![feature(deref_patterns)]
 #![feature(try_blocks)]
 // Used in monomorphize collector
 #![feature(impl_trait_in_assoc_type)]
