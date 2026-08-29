@@ -784,7 +784,7 @@ memoize!(
             .any(|x| x.instance == poly_instance)
         {
             // Recursion encountered.
-            if typing_env.param_env.caller_bounds().is_empty() {
+            if typing_env.param_env.is_empty() {
                 return Ok(ExpectationRange::top());
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
@@ -819,7 +819,7 @@ memoize!(
             }
         }
 
-        // if instance.def_id().is_local() && typing_env.param_env.caller_bounds().is_empty() {
+        // if instance.def_id().is_local() && typing_env.param_env.is_empty() {
         //     cx.sql_store::<drop_adjustment>(poly_instance, result);
         // }
 
@@ -1009,7 +1009,7 @@ memoize!(
             .any(|x| x.instance == poly_instance)
         {
             // Recursion encountered.
-            if typing_env.param_env.caller_bounds().is_empty() {
+            if typing_env.param_env.is_empty() {
                 return Ok(ExpectationRange::top());
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
@@ -1054,9 +1054,7 @@ memoize!(
             }
         }
 
-        if instance.def_id().is_local()
-            && (generic || typing_env.param_env.caller_bounds().is_empty())
-        {
+        if instance.def_id().is_local() && (generic || typing_env.param_env.is_empty()) {
             cx.sql_store::<instance_expectation>(poly_instance, result);
         }
 

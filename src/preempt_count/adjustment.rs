@@ -437,7 +437,7 @@ memoize!(
             .any(|x| x.instance == poly_instance)
         {
             // Recursion encountered.
-            if typing_env.param_env.caller_bounds().is_empty() {
+            if typing_env.param_env.is_empty() {
                 return Ok(0);
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
@@ -649,7 +649,7 @@ memoize!(
             .any(|x| x.instance == poly_instance)
         {
             // Recursion encountered.
-            if typing_env.param_env.caller_bounds().is_empty() {
+            if typing_env.param_env.is_empty() {
                 return Ok(0);
             } else {
                 // If we are handling generic functions, then defer decision to monomorphization time.
@@ -705,9 +705,7 @@ memoize!(
             }
         }
 
-        if instance.def_id().is_local()
-            && (generic || typing_env.param_env.caller_bounds().is_empty())
-        {
+        if instance.def_id().is_local() && (generic || typing_env.param_env.is_empty()) {
             cx.sql_store::<instance_adjustment>(poly_instance, result);
         }
 
