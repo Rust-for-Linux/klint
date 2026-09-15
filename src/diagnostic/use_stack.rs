@@ -4,13 +4,13 @@
 //! as some usage may be due to pointer coercion or static reference).
 
 use rustc_attr_ir::lang_items::LangItem;
-use rustc_errors::{Diag, EmissionGuarantee, MultiSpan};
+use rustc_errors::{Diag, MultiSpan};
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::{GenericArgs, Instance, PseudoCanonicalInput, TypingEnv};
 use rustc_span::{Span, sym};
 
 use crate::ctxt::AnalysisCtxt;
-use crate::diagnostic::PolyDisplay;
+use crate::diagnostic::{EmissionGuarantee, PolyDisplay};
 
 #[derive(Debug)]
 pub enum UseSiteKind {

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use rustc_attr_ir::lang_items::LangItem;
-use rustc_errors::{EmissionGuarantee, MultiSpan};
+use rustc_errors::MultiSpan;
 use rustc_hir::def_id::CrateNum;
 use rustc_middle::mir::{self, Body, TerminatorKind};
 use rustc_middle::ty::{
@@ -16,8 +16,8 @@ use rustc_trait_selection::infer::TyCtxtInferExt;
 use super::dataflow::AdjustmentComputation;
 use super::{Error, ExpectationRange};
 use crate::ctxt::AnalysisCtxt;
-use crate::diagnostic::PolyDisplay;
 use crate::diagnostic::use_stack::{UseSite, UseSiteKind};
+use crate::diagnostic::{EmissionGuarantee, PolyDisplay};
 use crate::lattice::MeetSemiLattice;
 
 impl<'tcx> AnalysisCtxt<'tcx> {

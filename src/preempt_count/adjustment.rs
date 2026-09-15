@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use rustc_attr_ir::lang_items::LangItem;
-use rustc_errors::{Diag, EmissionGuarantee, ErrorGuaranteed};
+use rustc_errors::{Diag, ErrorGuaranteed};
 use rustc_hir::def_id::CrateNum;
 use rustc_middle::mir::{Body, TerminatorKind, UnwindAction};
 use rustc_middle::ty::{
@@ -18,7 +18,7 @@ use rustc_trait_selection::infer::TyCtxtInferExt;
 use super::Error;
 use super::dataflow::{AdjustmentComputation, MaybeError};
 use crate::ctxt::AnalysisCtxt;
-use crate::diagnostic::PolyDisplay;
+use crate::diagnostic::{EmissionGuarantee, PolyDisplay};
 
 impl<'tcx> AnalysisCtxt<'tcx> {
     fn drop_adjustment_overflow(
@@ -49,7 +49,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             self.note_use_stack(&mut diag, &call_stack);
         }
 
-        diag.emit()
+        G::emit(diag)
     }
 
     fn report_adjustment_infer_error<'mir>(
