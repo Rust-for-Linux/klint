@@ -16,7 +16,7 @@
 #[macro_use]
 extern crate rustc_macros;
 #[macro_use]
-extern crate rustc_middle;
+extern crate rustc_span;
 #[macro_use]
 extern crate tracing;
 
@@ -35,13 +35,13 @@ extern crate rustc_interface;
 extern crate rustc_lint;
 extern crate rustc_log;
 extern crate rustc_metadata;
+extern crate rustc_middle;
 extern crate rustc_mir_dataflow;
 extern crate rustc_mir_transform;
 extern crate rustc_monomorphize;
 extern crate rustc_parse;
 extern crate rustc_serialize;
 extern crate rustc_session;
-extern crate rustc_span;
 extern crate rustc_structures;
 extern crate rustc_target;
 extern crate rustc_trait_selection;

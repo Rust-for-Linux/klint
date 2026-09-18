@@ -17,7 +17,7 @@ use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::util::Providers;
 use rustc_session::config::{OutputFilenames, OutputType, PrintRequest};
-use rustc_session::{EarlyDiagCtxt, IncrCompSession, Session};
+use rustc_session::{CodegenBackendInit, EarlyDiagCtxt, EarlySession, IncrCompSession, Session};
 
 pub trait CallbacksExt: Callbacks + Send + 'static {
     type ExtCtxt<'tcx>: DynSend + DynSync;
@@ -180,7 +180,7 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
         *ongoing_codegen.downcast().unwrap()
     }
 
-    fn init(&self, sess: &Session) {
+    fn init(&mut self, sess: &EarlySession) -> CodegenBackendInit {
         self.backend.init(sess)
     }
 
@@ -188,7 +188,7 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
         self.backend.print(req, out, sess)
     }
 
-    fn target_config(&self, sess: &Session) -> TargetConfig {
+    fn target_config(&self, sess: &EarlySession) -> TargetConfig {
         self.backend.target_config(sess)
     }
 
