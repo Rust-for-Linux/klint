@@ -6,6 +6,7 @@ use rustc_attr_ir::lang_items::LangItem;
 use rustc_errors::{Diag, ErrorGuaranteed};
 use rustc_hir::def_id::CrateNum;
 use rustc_middle::mir::{Body, TerminatorKind, UnwindAction};
+use rustc_middle::ty::consts::ConstExt;
 use rustc_middle::ty::{
     self, GenericArgs, Instance, PseudoCanonicalInput, Ty, TypingEnv, TypingMode,
 };
@@ -18,7 +19,7 @@ use rustc_trait_selection::infer::TyCtxtInferExt;
 use super::Error;
 use super::dataflow::{AdjustmentComputation, MaybeError};
 use crate::ctxt::AnalysisCtxt;
-use crate::diagnostic::{EmissionGuarantee, PolyDisplay};
+use crate::diagnostic::PolyDisplay;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
     fn drop_adjustment_overflow(
@@ -29,13 +30,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             "preemption count overflow when trying to compute adjustment of type `{}",
             PolyDisplay(&poly_ty)
         ));
-        Err(Error::Error(self.emit_with_use_site_info(diag)))
+        Err(Error::Error(self.note_use_site_info(diag).emit_err()))
     }
 
-    pub fn emit_with_use_site_info<G: EmissionGuarantee>(
-        &self,
-        mut diag: Diag<'tcx, G>,
-    ) -> G::EmitResult {
+    pub fn note_use_site_info(&self, mut diag: Diag<'tcx>) -> Diag<'tcx> {
         let call_stack = self.call_stack.borrow();
         if call_stack.len() > 4 && !self.recursion_limit().value_within_limit(call_stack.len()) {
             // This is recursion limit overflow, we don't want to spam the screen
@@ -48,8 +46,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         } else {
             self.note_use_stack(&mut diag, &call_stack);
         }
-
-        G::emit(diag)
+        diag
     }
 
     fn report_adjustment_infer_error<'mir>(
@@ -84,10 +81,12 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         // A catch-all error. MIR building usually should just have one `Return` terminator
         // so this usually shouldn't happen.
         let Some(return_bb) = return_bb else {
-            return self.emit_with_use_site_info(self.tcx.dcx().struct_span_err(
-                self.tcx.def_span(instance.def_id()),
-                "cannot infer preemption count adjustment of this function",
-            ));
+            return self
+                .note_use_site_info(self.tcx.dcx().struct_span_err(
+                    self.tcx.def_span(instance.def_id()),
+                    "cannot infer preemption count adjustment of this function",
+                ))
+                .emit_err();
         };
 
         // Find the deepest block in the dominator tree with good value on block start.
@@ -203,7 +202,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             count += 1;
             diag.span_note(span, msg);
         }
-        self.emit_with_use_site_info(diag)
+        self.note_use_site_info(diag).emit_err()
     }
 
     pub fn do_infer_adjustment(
@@ -266,10 +265,11 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             .recursion_limit()
             .value_within_limit(self.call_stack.borrow().len())
         {
-            self.emit_with_use_site_info(self.dcx().struct_fatal(format!(
+            self.note_use_site_info(self.dcx().struct_fatal(format!(
                 "reached the recursion limit while checking adjustment for `{}`",
                 PolyDisplay(&typing_env.as_query_input(instance))
-            )));
+            )))
+            .emit_fatal();
         }
 
         self.do_infer_adjustment(typing_env, instance, body)
@@ -408,7 +408,7 @@ memoize!(
                         "because slice can contain variable number of elements, adjustment \
                                for dropping the slice cannot be computed statically",
                     );
-                    return Err(Error::Error(cx.emit_with_use_site_info(diag)));
+                    return Err(Error::Error(cx.note_use_site_info(diag).emit_err()));
                 }
                 return Ok(0);
             }
@@ -562,7 +562,7 @@ memoize!(
                     ),
                 );
                 diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
-                cx.emit_with_use_site_info(diag);
+                cx.note_use_site_info(diag).emit();
             }
         }
 
@@ -799,7 +799,7 @@ memoize!(
                     ),
                 );
                 diag.note(format!("but the adjustment inferred is {adjustment_infer}"));
-                cx.emit_with_use_site_info(diag);
+                cx.note_use_site_info(diag).emit();
             }
         }
 
@@ -836,7 +836,7 @@ memoize!(
                             cx.def_span(ancestor_item.def_id),
                             "the trait method is defined here",
                         );
-                        cx.emit_with_use_site_info(diag);
+                        cx.note_use_site_info(diag).emit();
                     }
                 }
             }

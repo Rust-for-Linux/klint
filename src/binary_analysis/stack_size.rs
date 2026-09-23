@@ -136,7 +136,7 @@ pub fn stack_size_check<'tcx, 'obj>(cx: &AnalysisCtxt<'tcx>, file: &File<'obj>) 
                     continue;
                 }
 
-                let diag: Diag<'_, ()> = StackFrameTooLarge {
+                let diag: Diag<'_> = StackFrameTooLarge {
                     section: section.name().unwrap(),
                     offset,
                     insn: insn.to_string(),

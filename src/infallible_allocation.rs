@@ -19,10 +19,10 @@ declare_tool_lint! {
 
 declare_lint_pass!(InfallibleAllocation => [INFALLIBLE_ALLOCATION]);
 
-struct ClosureDiag<F: FnOnce(&mut Diag<'_, ()>)>(F);
+struct ClosureDiag<F: FnOnce(&mut Diag<'_>)>(F);
 
-impl<'a, F: FnOnce(&mut Diag<'_, ()>)> Diagnostic<'a, ()> for ClosureDiag<F> {
-    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, ()> {
+impl<'a, F: FnOnce(&mut Diag<'_>)> Diagnostic<'a> for ClosureDiag<F> {
+    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a> {
         let mut lint = Diag::new(dcx, level, "");
         (self.0)(&mut lint);
         lint

@@ -3,6 +3,8 @@
 error: this `build_error` reference is not optimized away
   --> $DIR/build_error.rs:9:13
    |
+ 6 | macro_rules! build_assert {
+...
  9 |             rust_build_error();
    |             ^^^^^^^^^^^^^^^^^^
 ...
@@ -19,7 +21,6 @@ note: reference contained in `fn gen_build_error`
    |
 20 | fn gen_build_error() {
    | ^^^^^^^^^^^^^^^^^^^^
-   = note: this error originates in the macro `build_assert` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: aborting due to 1 previous error
 

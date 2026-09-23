@@ -201,7 +201,7 @@ pub(crate) fn parse_preempt_count<'tcx>(
     .parse_preempt_count()
     {
         Ok(v) => v,
-        Err(err) => Err(err.emit())?,
+        Err(err) => Err(err.emit_err())?,
     };
 
     if v.adjustment.is_none() && v.expectation.is_none() {

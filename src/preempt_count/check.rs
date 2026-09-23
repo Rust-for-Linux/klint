@@ -86,7 +86,7 @@ impl<'mir, 'tcx, 'cx> MirNeighborVisitor<'mir, 'tcx, 'cx> {
                 "while the expected adjustment of `{}` is {} and the expectation is {}",
                 target_ty, target_adjustment, target_expectation
             ));
-            self.cx.emit_with_use_site_info(diag);
+            self.cx.note_use_site_info(diag).emit();
             return Ok(());
         }
 
@@ -429,10 +429,11 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             .recursion_limit()
             .value_within_limit(self.call_stack.borrow().len())
         {
-            self.emit_with_use_site_info(self.dcx().struct_fatal(format!(
+            self.note_use_site_info(self.dcx().struct_fatal(format!(
                 "reached the recursion limit while checking indirect calls for `{}`",
                 PolyDisplay(&typing_env.as_query_input(instance))
-            )));
+            )))
+            .emit_fatal();
         }
 
         self.do_indirect_check(typing_env, instance, body)
@@ -471,7 +472,7 @@ memoize!(
                 crate::atomic_context::INDIRECT_DEFAULT.0,
                 crate::atomic_context::INDIRECT_DEFAULT.1
             ));
-            cx.emit_with_use_site_info(diag);
+            cx.note_use_site_info(diag).emit();
         }
 
         Ok(())
@@ -642,7 +643,7 @@ memoize!(
         }
 
         if let Some(diag) = diag {
-            cx.emit_with_use_site_info(diag);
+            cx.note_use_site_info(diag).emit();
         }
 
         Ok(())

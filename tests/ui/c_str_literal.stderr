@@ -13,13 +13,13 @@ note: the lint level is defined here
 error: `c_str!` is used on a literal
   --> $DIR/c_str_literal.rs:23:9
    |
+21 | macro_rules! wrap_c_str {
+22 |     () => {
 23 |         c_str!("hello")
    |         ^^^^^^^^^^^^^^^ help: use C-string literals instead: `c"hello"`
 ...
 41 |     wrap_c_str!();
    |     ------------- in this macro invocation
-   |
-   = note: this error originates in the macro `wrap_c_str` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: aborting due to 2 previous errors
 

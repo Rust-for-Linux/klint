@@ -6,6 +6,7 @@ use rustc_attr_ir::lang_items::LangItem;
 use rustc_errors::MultiSpan;
 use rustc_hir::def_id::CrateNum;
 use rustc_middle::mir::{self, Body, TerminatorKind};
+use rustc_middle::ty::consts::ConstExt;
 use rustc_middle::ty::{
     self, GenericArgs, Instance, PseudoCanonicalInput, Ty, TypingEnv, TypingMode,
 };
@@ -16,8 +17,8 @@ use rustc_trait_selection::infer::TyCtxtInferExt;
 use super::dataflow::AdjustmentComputation;
 use super::{Error, ExpectationRange};
 use crate::ctxt::AnalysisCtxt;
+use crate::diagnostic::PolyDisplay;
 use crate::diagnostic::use_stack::{UseSite, UseSiteKind};
-use crate::diagnostic::{EmissionGuarantee, PolyDisplay};
 use crate::lattice::MeetSemiLattice;
 
 impl<'tcx> AnalysisCtxt<'tcx> {
@@ -88,14 +89,14 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     }
 
     #[instrument(skip(self, typing_env, body, diag), fields(instance = %PolyDisplay(&typing_env.as_query_input(instance))), ret)]
-    pub fn report_body_expectation_error<G: EmissionGuarantee>(
+    pub fn report_body_expectation_error(
         &self,
         typing_env: TypingEnv<'tcx>,
         instance: Instance<'tcx>,
         body: &Body<'tcx>,
         expected: ExpectationRange,
         span: Option<MultiSpan>,
-        diag: &mut rustc_errors::Diag<'_, G>,
+        diag: &mut rustc_errors::Diag<'_>,
     ) -> Result<(), Error> {
         let mut analysis_result = AdjustmentComputation {
             checker: self,
@@ -265,13 +266,13 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     // we have a pre-determined expectation, and then we need to recurse into the callees to find a violation.
     //
     // Must only be called on instances that actually are errors.
-    pub fn report_instance_expectation_error<G: EmissionGuarantee>(
+    pub fn report_instance_expectation_error(
         &self,
         typing_env: TypingEnv<'tcx>,
         instance: Instance<'tcx>,
         expected: ExpectationRange,
         span: MultiSpan,
-        diag: &mut rustc_errors::Diag<'_, G>,
+        diag: &mut rustc_errors::Diag<'_>,
     ) -> Result<(), Error> {
         match instance.def {
             // No Rust built-in intrinsics will mess with preemption count.
@@ -348,13 +349,13 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         self.report_body_expectation_error(typing_env, instance, body, expected, None, diag)
     }
 
-    pub fn report_drop_expectation_error<G: EmissionGuarantee>(
+    pub fn report_drop_expectation_error(
         &self,
         typing_env: TypingEnv<'tcx>,
         ty: Ty<'tcx>,
         expected: ExpectationRange,
         span: MultiSpan,
-        diag: &mut rustc_errors::Diag<'_, G>,
+        diag: &mut rustc_errors::Diag<'_>,
     ) -> Result<(), Error> {
         // If the type doesn't need drop, then there is trivially no expectation.
         assert!(ty.needs_drop(self.tcx, typing_env));
@@ -570,7 +571,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
                 ));
 
                 // Stop processing other calls in this function to avoid generating too many errors.
-                return Err(Error::Error(self.emit_with_use_site_info(diag)));
+                return Err(Error::Error(self.note_use_site_info(diag).emit_err()));
             }
 
             expectation_infer = expected;
@@ -589,10 +590,11 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             .recursion_limit()
             .value_within_limit(self.call_stack.borrow().len())
         {
-            self.emit_with_use_site_info(self.dcx().struct_fatal(format!(
+            self.note_use_site_info(self.dcx().struct_fatal(format!(
                 "reached the recursion limit while checking expectation for `{}`",
                 PolyDisplay(&typing_env.as_query_input(instance))
-            )));
+            )))
+            .emit_fatal();
         }
 
         self.do_infer_expectation(typing_env, instance, body)
@@ -660,7 +662,7 @@ memoize!(
                         exp + adj
                     ));
                     diag.note(format!("content being dropped is `{}`", boxed_ty));
-                    return Err(Error::Error(cx.emit_with_use_site_info(diag)));
+                    return Err(Error::Error(cx.note_use_site_info(diag).emit_err()));
                 }
 
                 return Ok(expected);
@@ -748,7 +750,7 @@ memoize!(
                         elem_exp + last_adj
                     ));
                     diag.note(format!("array being dropped is `{}`", ty));
-                    return Err(Error::Error(cx.emit_with_use_site_info(diag)));
+                    return Err(Error::Error(cx.note_use_site_info(diag).emit_err()));
                 }
 
                 return Ok(expected);
@@ -1223,7 +1225,7 @@ memoize!(
                             )
                             .unwrap();
                         }
-                        cx.emit_with_use_site_info(diag);
+                        cx.note_use_site_info(diag).emit();
                     }
                 }
             }

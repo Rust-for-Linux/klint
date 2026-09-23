@@ -10,7 +10,7 @@ use rustc_middle::ty::{GenericArgs, Instance, PseudoCanonicalInput, TypingEnv};
 use rustc_span::{Span, sym};
 
 use crate::ctxt::AnalysisCtxt;
-use crate::diagnostic::{EmissionGuarantee, PolyDisplay};
+use crate::diagnostic::PolyDisplay;
 
 #[derive(Debug)]
 pub enum UseSiteKind {
@@ -86,11 +86,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         self.poly_instance_of_def_id(instance.value.def_id()) == instance
     }
 
-    pub fn note_use_stack<G: EmissionGuarantee>(
-        &self,
-        diag: &mut Diag<'tcx, G>,
-        use_stack: &[UseSite<'tcx>],
-    ) {
+    pub fn note_use_stack(&self, diag: &mut Diag<'tcx>, use_stack: &[UseSite<'tcx>]) {
         for site in use_stack.iter().rev() {
             let def_id = site.instance.value.def_id();
             if self.is_lang_item(def_id, LangItem::DropGlue) {

@@ -1,6 +1,5 @@
 pub(crate) mod use_stack;
 
-use rustc_errors::{Diag, ErrorGuaranteed, FatalAbort};
 use rustc_middle::ty::PseudoCanonicalInput;
 
 pub struct PolyDisplay<'a, 'tcx, T>(pub &'a PseudoCanonicalInput<'tcx, T>);
@@ -22,35 +21,5 @@ where
             }
         }
         Ok(())
-    }
-}
-
-pub trait EmissionGuarantee: Sized {
-    type EmitResult;
-
-    fn emit(diag: Diag<'_, Self>) -> Self::EmitResult;
-}
-
-impl EmissionGuarantee for () {
-    type EmitResult = ();
-
-    fn emit(diag: Diag<'_, Self>) -> () {
-        diag.emit()
-    }
-}
-
-impl EmissionGuarantee for ErrorGuaranteed {
-    type EmitResult = ErrorGuaranteed;
-
-    fn emit(diag: Diag<'_, Self>) -> Self::EmitResult {
-        diag.emit()
-    }
-}
-
-impl EmissionGuarantee for FatalAbort {
-    type EmitResult = !;
-
-    fn emit(diag: Diag<'_, Self>) -> Self::EmitResult {
-        diag.emit()
     }
 }
