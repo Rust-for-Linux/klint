@@ -1,7 +1,7 @@
 error: freeing the box expects the preemption count to be 0
-  --> $DIR/box_free.rs:31:57
+  --> $DIR/box_free.rs:29:57
    |
-31 | fn drop_box(x: Box<SleepAndLockOnDrop, TestAllocator>) {}
+29 | fn drop_box(x: Box<SleepAndLockOnDrop, TestAllocator>) {}
    |             - value being dropped is here               ^
    |
    = note: but the possible preemption count after dropping the content is 1
