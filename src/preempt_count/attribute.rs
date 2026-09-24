@@ -2,8 +2,8 @@ use std::borrow::Cow;
 
 use rustc_ast::token::TokenKind;
 use rustc_ast::{DelimArgs, Expr, ExprKind, LitKind, RangeLimits, UnOp};
+use rustc_attr_ir::{AttrArgs, AttrItem, Attribute};
 use rustc_errors::{ErrorGuaranteed, PResult};
-use rustc_hir::{AttrArgs, AttrItem, Attribute};
 use rustc_middle::ty::TyCtxt;
 use rustc_parse::exp;
 use rustc_parse::parser::Parser;

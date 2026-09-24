@@ -5,7 +5,8 @@
 use std::sync::Arc;
 
 use rustc_ast::{LitKind, MetaItemLit};
-use rustc_hir::{AttrArgs, Attribute, HirId};
+use rustc_attr_ir::{AttrArgs, Attribute};
+use rustc_hir::HirId;
 use rustc_middle::ty::TyCtxt;
 use rustc_span::{Span, Symbol};
 
