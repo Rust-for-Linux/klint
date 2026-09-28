@@ -1,7 +1,7 @@
 use iced_x86::{Decoder, DecoderOptions, Mnemonic, OpKind, Register};
 use object::{Architecture, File, Object, ObjectSection, SectionKind};
 use rustc_data_structures::fx::FxHashSet;
-use rustc_errors::{Diag, Diagnostic, Level};
+use rustc_errors::{Diag, Diagnostic, EmissionOverride, Level};
 use rustc_hir::CRATE_HIR_ID;
 use rustc_lint::declare_tool_lint;
 use rustc_middle::mono::MonoItem;
@@ -62,8 +62,10 @@ pub fn stack_size_check<'tcx, 'obj>(cx: &AnalysisCtxt<'tcx>, file: &File<'obj>) 
         // NOTE: `expect` is actually not supported as this check is too late.
         // But we need to match it so treat like `allow` anyway.
         rustc_lint::Level::Allow | rustc_lint::Level::Expect => return,
-        rustc_lint::Level::Warn => Level::Warning,
-        rustc_lint::Level::ForceWarn => Level::ForceWarning,
+        rustc_lint::Level::Warn => Level::Warning(None),
+        rustc_lint::Level::ForceWarn => {
+            Level::Warning(Some(EmissionOverride::Forced { lint_id: None }))
+        }
         rustc_lint::Level::Deny | rustc_lint::Level::Forbid => Level::Error,
     };
 

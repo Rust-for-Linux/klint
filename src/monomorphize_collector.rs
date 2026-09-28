@@ -9,12 +9,12 @@
 // * Due to the above reasons, `InliningMap` is renamed to `AccessMap`.
 // * `Spanned<MonoItem>` is returned in `AccessMap` instead of just `MonoItem`.
 
+use rustc_attr_ir::InlineAttr;
 use rustc_attr_ir::lang_items::LangItem;
 use rustc_data_structures::fx::{FxHashMap, FxIndexMap};
 use rustc_data_structures::sync::{Lock, par_for_each_in};
 use rustc_data_structures::unord::UnordSet;
 use rustc_hir as hir;
-use rustc_hir::attrs::InlineAttr;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, DefIdMap, LocalDefId};
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;

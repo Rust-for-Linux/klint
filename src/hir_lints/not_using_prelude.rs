@@ -3,7 +3,7 @@ use std::sync::Arc;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
-use rustc_hir::{Item, ItemKind, UseKind};
+use rustc_hir::{Item, ItemKind, UseKind, UseTree};
 use rustc_lint::{LateContext, LateLintPass, LintContext, declare_tool_lint, impl_lint_pass};
 use rustc_span::{Symbol, sym};
 
@@ -30,26 +30,39 @@ struct NotUsingPreludeLint {
     pub crate_name: Symbol,
 }
 
-impl<'tcx> LateLintPass<'tcx> for NotUsingPrelude<'tcx> {
-    fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
-        let ItemKind::Use(path, UseKind::Single(import_name)) = item.kind else {
-            return;
+impl<'tcx> NotUsingPrelude<'tcx> {
+    fn check_use_tree(&self, cx: &LateContext<'tcx>, tree: &UseTree<'tcx>) {
+        let import_name = match tree.kind {
+            UseKind::Single(import_name) => import_name,
+            UseKind::Glob => return,
+            UseKind::Nested { items } => {
+                for (tree, _, _) in items {
+                    self.check_use_tree(cx, tree);
+                }
+                return;
+            }
         };
 
         // Manual prelude import. This is possible the user trying to solve conflicts or performing a rename.
-        if path.segments.iter().any(|x| x.ident.name == sym::prelude) {
+        if tree
+            .prefix
+            .segments
+            .iter()
+            .any(|x| x.ident.name == sym::prelude)
+        {
             return;
         }
 
         // If the import is renamed, that is likely intentional.
-        if path.segments.last().unwrap().ident != import_name {
+        if tree.prefix.segments.last().unwrap().ident != import_name {
             return;
         }
 
         let prelude = self.cx.prelude_def_ids();
         // A `use` may bring in things from multiple namespaces. To avoid false positives, we
         // only issue warnings if *all* items imported such way are already available through prelude.
-        if !path
+        if !tree
+            .prefix
             .res
             .present_items()
             .all(|x| x.opt_def_id().is_some_and(|x| prelude.contains_key(&x)))
@@ -64,15 +77,25 @@ impl<'tcx> LateLintPass<'tcx> for NotUsingPrelude<'tcx> {
             return;
         }
 
-        let imported_def_id = path.res.present_items().next().unwrap().def_id();
+        let imported_def_id = tree.prefix.res.present_items().next().unwrap().def_id();
         let cnum = prelude.get(&imported_def_id).copied().unwrap();
         let crate_name = self.cx.crate_name(cnum);
 
         cx.emit_span_lint(
             NOT_USING_PRELUDE,
-            item.span,
+            import_name.span,
             NotUsingPreludeLint { crate_name },
         );
+    }
+}
+
+impl<'tcx> LateLintPass<'tcx> for NotUsingPrelude<'tcx> {
+    fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
+        let ItemKind::Use(tree) = &item.kind else {
+            return;
+        };
+
+        self.check_use_tree(cx, tree);
     }
 }
 
