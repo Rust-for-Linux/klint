@@ -222,7 +222,7 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
 }
 
 pub fn run_compiler<C: CallbacksExt>(at_args: &[String], callback: C) {
-    rustc_driver::run_compiler(
+    rustc_driver::compiler_entrypoint(
         at_args,
         &mut CallbackWrapper {
             callback: Arc::new(Mutex::new(callback)),
