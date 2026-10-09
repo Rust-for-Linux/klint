@@ -11,7 +11,7 @@ use rustc_middle::ty::{self, InternerDecoder, Ty, TyCtxt};
 use rustc_serialize::opaque::{MAGIC_END_BYTES, MemDecoder};
 use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_session::StableCrateId;
-use rustc_span::def_id::{CrateNum, DefId, DefIndex};
+use rustc_span::def_id::{CrateNum, DefId, DefIndex, LocalDefId};
 use rustc_span::{
     BlobDecoder, BytePos, ByteSymbol, DUMMY_SP, SourceFile, Span, SpanDecoder, SpanEncoder,
     StableSourceFileId, Symbol, SyntaxContext,
@@ -470,5 +470,9 @@ impl<'a, 'tcx> BlobDecoder for DecodeContext<'a, 'tcx> {
 
     fn decode_def_index(&mut self) -> DefIndex {
         DefIndex::from_u32(self.read_u32())
+    }
+
+    fn decode_local_def_id(&mut self) -> LocalDefId {
+        self.decode_def_id().expect_local()
     }
 }
