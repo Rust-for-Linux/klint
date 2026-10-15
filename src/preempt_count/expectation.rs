@@ -6,7 +6,6 @@ use rustc_attr_ir::lang_items::LangItem;
 use rustc_errors::MultiSpan;
 use rustc_hir::def_id::CrateNum;
 use rustc_middle::mir::{self, Body, TerminatorKind};
-use rustc_middle::ty::consts::ConstExt;
 use rustc_middle::ty::{
     self, GenericArgs, Instance, PseudoCanonicalInput, Ty, TypingEnv, TypingMode,
 };
