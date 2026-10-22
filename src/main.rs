@@ -11,6 +11,8 @@
 // Used in symbol.rs
 #![feature(macro_metavar_expr)]
 #![feature(unsize)]
+// Used in `declare_tool_lint!` macro
+#![feature(default_field_values)]
 #![warn(rustc::internal)]
 
 #[macro_use]
