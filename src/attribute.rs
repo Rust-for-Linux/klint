@@ -81,10 +81,10 @@ pub fn parse_klint_attribute(tcx: TyCtxt<'_>, attr: &Attribute) -> Option<KlintA
         })),
 
         crate::symbol::preempt_count => Some(KlintAttribute::PreemptionCount(
-            preempt_count::attribute::parse_preempt_count(tcx, attr, item).ok()?,
+            preempt_count::attribute::parse_preempt_count(tcx, item).ok()?,
         )),
         crate::symbol::drop_preempt_count => Some(KlintAttribute::DropPreemptionCount(
-            preempt_count::attribute::parse_preempt_count(tcx, attr, item).ok()?,
+            preempt_count::attribute::parse_preempt_count(tcx, item).ok()?,
         )),
         crate::symbol::report_preempt_count => Some(KlintAttribute::ReportPreeptionCount),
         crate::symbol::dump_mir => Some(KlintAttribute::DumpMir),
@@ -99,7 +99,7 @@ pub fn parse_klint_attribute(tcx: TyCtxt<'_>, attr: &Attribute) -> Option<KlintA
             } = item.args
             else {
                 tcx.dcx()
-                    .emit_err(InvalidDiagnosticItem { span: attr.span() });
+                    .emit_err(InvalidDiagnosticItem { span: item.span });
                 None?
             };
 

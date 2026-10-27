@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use rustc_ast::token::TokenKind;
 use rustc_ast::{DelimArgs, Expr, ExprKind, LitKind, RangeLimits, UnOp};
-use rustc_attr_ir::{AttrArgs, AttrItem, Attribute};
+use rustc_attr_ir::{AttrArgs, AttrItem};
 use rustc_errors::{ErrorGuaranteed, PResult};
 use rustc_middle::ty::TyCtxt;
 use rustc_parse::exp;
@@ -183,12 +183,11 @@ impl<'a, 'tcx> AttrParser<'a, 'tcx> {
 
 pub(crate) fn parse_preempt_count<'tcx>(
     tcx: TyCtxt<'tcx>,
-    attr: &Attribute,
     item: &AttrItem,
 ) -> Result<PreemptionCount, ErrorGuaranteed> {
     let AttrArgs::Delimited(DelimArgs { dspan, tokens, .. }) = &item.args else {
         Err(tcx.dcx().emit_err(InvalidPreemptCountAttribute {
-            span: attr.span(),
+            span: item.span,
             help: "correct usage looks like `#[kint::preempt_count(...)]`".into(),
         }))?
     };
