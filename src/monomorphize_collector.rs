@@ -1630,7 +1630,7 @@ pub fn collect_crate_mono_items(
     let recursion_limit = tcx.recursion_limit();
 
     tcx.sess.time("monomorphization_collector_graph_walk", || {
-        par_for_each_in(roots, |root| {
+        par_for_each_in(&roots[..], |root| {
             collect_items_root(tcx, dummy_spanned(*root), &state, recursion_limit);
         });
     });
