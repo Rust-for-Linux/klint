@@ -128,7 +128,10 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             }
 
             if !self.is_fully_polymorphic(site.instance) {
-                diag.note(format!("inside instance `{}`", PolyDisplay(&site.instance)));
+                diag.note(format!(
+                    "inside instance `{}`",
+                    PolyDisplay(self.tcx, &site.instance)
+                ));
             }
         }
     }

@@ -431,7 +431,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         {
             self.note_use_site_info(self.dcx().struct_fatal(format!(
                 "reached the recursion limit while checking indirect calls for `{}`",
-                PolyDisplay(&typing_env.as_query_input(instance))
+                PolyDisplay(self.tcx, &typing_env.as_query_input(instance))
             )))
             .emit_fatal();
         }
@@ -443,7 +443,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 memoize!(
     // Make this a query so that the same function is only reported once even if converted to pointers
     // in multiple sites.
-    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)), ret)]
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(cx.tcx, &poly_instance)), ret)]
     fn function_pointer_cast_check_indirect<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: PseudoCanonicalInput<'tcx, Instance<'tcx>>,
@@ -461,7 +461,7 @@ memoize!(
             );
             diag.help(format!(
                 "`{}` is being converted to a pointer",
-                PolyDisplay(&poly_instance)
+                PolyDisplay(cx.tcx, &poly_instance)
             ));
             diag.help(format!(
                 "adjustment of this function is inferred to be {} and expectation is inferred to be {}",
@@ -485,7 +485,7 @@ memoize!(
     #[instrument(
         skip(cx, poly_ty_trait_ref),
         fields(
-            poly_ty = %PolyDisplay(&poly_ty_trait_ref.typing_env.as_query_input(poly_ty_trait_ref.value.0)),
+            poly_ty = %PolyDisplay(cx.tcx, &poly_ty_trait_ref.typing_env.as_query_input(poly_ty_trait_ref.value.0)),
             trait_ref = ?poly_ty_trait_ref.value.1
         ),
         ret
@@ -588,7 +588,7 @@ memoize!(
                         });
                         diag.help(format!(
                             "`{}` is constructed as part of `dyn {}`",
-                            PolyDisplay(&poly_instance),
+                            PolyDisplay(cx.tcx, &poly_instance),
                             cx.def_path_str(principal.def_id())
                         ));
                         diag.help(format!(
@@ -627,7 +627,7 @@ memoize!(
             });
             diag.help(format!(
                 "drop glue of `{}` is constructed as part of `dyn {}`",
-                PolyDisplay(&poly_ty),
+                PolyDisplay(cx.tcx, &poly_ty),
                 trait_ref
                     .map(|x| cx.def_path_str(x.def_id()))
                     .unwrap_or_default()
@@ -651,7 +651,7 @@ memoize!(
 );
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)), ret)]
+    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(cx.tcx, &poly_ty)), ret)]
     fn drop_check<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: PseudoCanonicalInput<'tcx, Ty<'tcx>>,
@@ -760,7 +760,7 @@ memoize!(
 );
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)), ret)]
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(cx.tcx, &poly_instance)), ret)]
     pub fn instance_check<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: PseudoCanonicalInput<'tcx, Instance<'tcx>>,

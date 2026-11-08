@@ -27,7 +27,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
     ) -> Result<!, Error> {
         let diag = self.dcx().struct_err(format!(
             "preemption count overflow when trying to compute adjustment of type `{}",
-            PolyDisplay(&poly_ty)
+            PolyDisplay(self.tcx, &poly_ty)
         ));
         Err(Error::Error(self.note_use_site_info(diag).emit_err()))
     }
@@ -266,7 +266,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         {
             self.note_use_site_info(self.dcx().struct_fatal(format!(
                 "reached the recursion limit while checking adjustment for `{}`",
-                PolyDisplay(&typing_env.as_query_input(instance))
+                PolyDisplay(self.tcx, &typing_env.as_query_input(instance))
             )))
             .emit_fatal();
         }
@@ -276,7 +276,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 }
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)), ret)]
+    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(cx.tcx, &poly_ty)), ret)]
     pub fn drop_adjustment<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: PseudoCanonicalInput<'tcx, Ty<'tcx>>,
@@ -476,7 +476,7 @@ memoize!(
 );
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)), ret)]
+    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(cx.tcx, &poly_ty)), ret)]
     pub fn drop_adjustment_check<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: PseudoCanonicalInput<'tcx, Ty<'tcx>>,
@@ -570,7 +570,7 @@ memoize!(
 );
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)), ret)]
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(cx.tcx, &poly_instance)), ret)]
     pub fn instance_adjustment<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: PseudoCanonicalInput<'tcx, Instance<'tcx>>,
@@ -693,7 +693,7 @@ memoize!(
                     if !generic {
                         diag.note(format!(
                             "instance being checked is `{}`",
-                            PolyDisplay(&poly_instance)
+                            PolyDisplay(cx.tcx, &poly_instance)
                         ));
                     }
                     diag.help(format!(
@@ -711,7 +711,7 @@ memoize!(
         if cx.should_report_preempt_count(instance.def_id()) {
             let mut diag = cx.sess.dcx().struct_note(format!(
                 "reporting preemption count for instance `{}`",
-                PolyDisplay(&poly_instance)
+                PolyDisplay(cx.tcx, &poly_instance)
             ));
             diag.span(cx.def_span(instance.def_id()));
             if let Ok(property) = result {
@@ -727,7 +727,7 @@ memoize!(
 );
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)), ret)]
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(cx.tcx, &poly_instance)), ret)]
     pub fn instance_adjustment_check<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: PseudoCanonicalInput<'tcx, Instance<'tcx>>,

@@ -87,7 +87,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         })
     }
 
-    #[instrument(skip(self, typing_env, body, diag), fields(instance = %PolyDisplay(&typing_env.as_query_input(instance))), ret)]
+    #[instrument(skip(self, typing_env, body, diag), fields(instance = %PolyDisplay(self.tcx, &typing_env.as_query_input(instance))), ret)]
     pub fn report_body_expectation_error(
         &self,
         typing_env: TypingEnv<'tcx>,
@@ -473,7 +473,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
             span,
             format!(
                 "which may drop type `{}` with preemption count {}",
-                PolyDisplay(&typing_env.as_query_input(ty)),
+                PolyDisplay(self.tcx, &typing_env.as_query_input(ty)),
                 expected,
             ),
         );
@@ -591,7 +591,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
         {
             self.note_use_site_info(self.dcx().struct_fatal(format!(
                 "reached the recursion limit while checking expectation for `{}`",
-                PolyDisplay(&typing_env.as_query_input(instance))
+                PolyDisplay(self.tcx, &typing_env.as_query_input(instance))
             )))
             .emit_fatal();
         }
@@ -601,7 +601,7 @@ impl<'tcx> AnalysisCtxt<'tcx> {
 }
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)), ret)]
+    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(cx.tcx, &poly_ty)), ret)]
     pub fn drop_expectation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: PseudoCanonicalInput<'tcx, Ty<'tcx>>,
@@ -829,7 +829,7 @@ memoize!(
 );
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(&poly_ty)), ret)]
+    #[instrument(skip(cx), fields(poly_ty = %PolyDisplay(cx.tcx, &poly_ty)), ret)]
     pub fn drop_expectation_check<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_ty: PseudoCanonicalInput<'tcx, Ty<'tcx>>,
@@ -925,7 +925,7 @@ memoize!(
 );
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)), ret)]
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(cx.tcx, &poly_instance)), ret)]
     pub fn instance_expectation<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: PseudoCanonicalInput<'tcx, Instance<'tcx>>,
@@ -1044,7 +1044,7 @@ memoize!(
                     if !generic {
                         diag.note(format!(
                             "instance being checked is `{}`",
-                            PolyDisplay(&poly_instance)
+                            PolyDisplay(cx.tcx, &poly_instance)
                         ));
                     }
                     diag.help(format!(
@@ -1062,7 +1062,7 @@ memoize!(
         if cx.should_report_preempt_count(instance.def_id()) {
             let mut diag = cx.sess.dcx().struct_note(format!(
                 "reporting preemption count for instance `{}`",
-                PolyDisplay(&poly_instance)
+                PolyDisplay(cx.tcx, &poly_instance)
             ));
             diag.span(cx.def_span(instance.def_id()));
             if let Ok(property) = result {
@@ -1087,7 +1087,7 @@ impl crate::ctxt::PersistentQuery for instance_expectation {
 }
 
 memoize!(
-    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(&poly_instance)), ret)]
+    #[instrument(skip(cx), fields(poly_instance = %PolyDisplay(cx.tcx, &poly_instance)), ret)]
     pub fn instance_expectation_check<'tcx>(
         cx: &AnalysisCtxt<'tcx>,
         poly_instance: PseudoCanonicalInput<'tcx, Instance<'tcx>>,
