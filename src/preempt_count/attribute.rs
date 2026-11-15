@@ -62,7 +62,7 @@ impl<'a, 'tcx> AttrParser<'a, 'tcx> {
         }
     }
 
-    fn convert_small_literal(&self, expr: &Expr) -> PResult<'_, u32> {
+    fn convert_small_literal(&self, expr: &Expr) -> PResult<'a, u32> {
         match expr.kind {
             ExprKind::Lit(lit) => self.convert_small_int(expr.span, lit),
             _ => Err(self.parser.dcx().create_err(InvalidPreemptCountAttribute {
@@ -72,7 +72,7 @@ impl<'a, 'tcx> AttrParser<'a, 'tcx> {
         }
     }
 
-    fn convert_small_literal_with_minus(&self, expr: &Expr) -> PResult<'_, i32> {
+    fn convert_small_literal_with_minus(&self, expr: &Expr) -> PResult<'a, i32> {
         match expr.kind {
             ExprKind::Lit(lit) => Ok(self.convert_small_int(expr.span, lit)? as i32),
             ExprKind::Unary(
@@ -93,7 +93,7 @@ impl<'a, 'tcx> AttrParser<'a, 'tcx> {
         }
     }
 
-    fn parse_preempt_count(&mut self) -> PResult<'_, PreemptionCount> {
+    fn parse_preempt_count(&mut self) -> PResult<'a, PreemptionCount> {
         let mut adjustment = None;
         let mut expectation = None;
         let mut unchecked = false;
