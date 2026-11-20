@@ -48,7 +48,7 @@ struct InvalidDiagnosticItem {
 }
 
 pub fn parse_klint_attribute(tcx: TyCtxt<'_>, attr: &Attribute) -> Option<KlintAttribute> {
-    let Attribute::Tool(item) = attr else {
+    let Attribute::Tool { item, opts: _ } = attr else {
         return None;
     };
     if item.path.segments[0] != crate::symbol::klint {

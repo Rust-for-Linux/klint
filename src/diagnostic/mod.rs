@@ -16,7 +16,7 @@ where
             for (i, clause) in typing_env
                 .param_env
                 .caller_bounds()
-                .all_clauses(self.0)
+                .all_clauses_interned(self.0)
                 .iter()
                 .enumerate()
             {

@@ -830,7 +830,9 @@ fn visit_instance_use<'tcx>(
         // TODO: should I also vendor in autodiff code?
         // collect_autodiff_fn(tcx, instance, intrinsic, output);
 
-        if let Some(_requirement) = ValidityRequirement::from_intrinsic(intrinsic.name) {
+        if let ty::Intrinsic::Rustc(name) = intrinsic.name
+            && let Some(_requirement) = ValidityRequirement::from_rustc_intrinsic(name)
+        {
             // The intrinsics assert_inhabited, assert_zero_valid, and assert_mem_uninitialized_valid will
             // be lowered in codegen to nothing or a call to panic_nounwind. So if we encounter any
             // of those intrinsics, we need to include a mono item for panic_nounwind, else we may try to
