@@ -38,6 +38,7 @@ fn run_ui_tests(bless: bool) {
             "--emit=obj",
             "-O",
             "-Cdebuginfo=1",
+            "-Zthreads=1",
             "--cfg=CONFIG_FRAME_WARN=\"2048\"",
         ]
         .join(" "),
