@@ -1,0 +1,151 @@
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:11:5
+   |
+11 |     pr_info!("probe {}/n", 1);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `dev` to include device information
+note: the lint level is defined here
+  --> $DIR/prefer_device_logging.rs:3:9
+   |
+ 3 | #![deny(klint::prefer_device_logging)]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: `pr_err!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:12:5
+   |
+12 |     pr_err!("failure/n");
+   |     ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_err!` with `dev` to include device information
+
+error: `pr_debug!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:13:5
+   |
+13 |     pr_debug!("debug/n");
+   |     ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_dbg!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:17:5
+   |
+17 |     pr_info!("wrapper/n");
+   |     ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:21:5
+   |
+21 |     pr_info!("generic context/n");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:25:5
+   |
+25 |     pr_info!("generic wrapper/n");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:32:5
+   |
+32 |     pr_info!("local/n");
+   |     ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:41:9
+   |
+41 |         pr_info!("inner/n");
+   |         ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:48:5
+   |
+48 |     pr_info!("outer/n");
+   |     ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:53:22
+   |
+53 |         Some(dev) => pr_info!("match/n"),
+   |                      ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:57:9
+   |
+57 |         pr_info!("if let/n");
+   |         ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:62:9
+   |
+62 |         pr_info!("while let/n");
+   |         ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+  --> $DIR/prefer_device_logging.rs:79:5
+   |
+79 |     info!("renamed macro/n");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `dev_info!` with `device` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+   --> $DIR/prefer_device_logging.rs:103:17
+    |
+103 |     let dev = { pr_info!("old binding still visible/n"); 1 };
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+   --> $DIR/prefer_device_logging.rs:108:16
+    |
+108 |     let _ = || pr_info!("outer device can be captured/n");
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+   --> $DIR/prefer_device_logging.rs:110:31
+    |
+110 |     let _ = |device: &Device| pr_info!("closure argument/n");
+    |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `dev_info!` with `device` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+   --> $DIR/prefer_device_logging.rs:114:35
+    |
+114 |     if let Some(dev) = value && { pr_info!("condition/n"); true } {
+    |                                   ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `dev_info!` with `dev` to include device information
+
+error: `pr_info!` is used while a device reference is in scope
+   --> $DIR/prefer_device_logging.rs:115:9
+    |
+115 |         pr_info!("then branch/n");
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `dev_info!` with `dev` to include device information
+
+error: aborting due to 18 previous errors
+

@@ -117,6 +117,7 @@ impl Callbacks for MyCallbacks {
                 binary_analysis::stack_size::STACK_FRAME_TOO_LARGE,
                 hir_lints::c_str_literal::C_STR_LITERAL,
                 hir_lints::not_using_prelude::NOT_USING_PRELUDE,
+                hir_lints::prefer_device_logging::PREFER_DEVICE_LOGGING,
             ]);
 
             lint_store.register_late_lint_pass(Box::new(|tcx| {
@@ -129,6 +130,10 @@ impl Callbacks for MyCallbacks {
                 Box::new(hir_lints::not_using_prelude::NotUsingPrelude {
                     cx: driver::cx::<MyCallbacks>(tcx),
                 })
+            }));
+
+            lint_store.register_late_lint_pass(Box::new(|_| {
+                Box::new(hir_lints::prefer_device_logging::PreferDeviceLogging::default())
             }));
 
             // lint_store
