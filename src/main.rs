@@ -99,6 +99,10 @@ impl Callbacks for MyCallbacks {
 
         config.extra_symbols = crate::symbol::EXTRA_SYMBOLS.to_owned();
 
+        // Allow the code being compiled to be able to detect if klint is used (should be used with
+        // caution, as in most cases code should behave the same regardless klint's presence!).
+        config.crate_cfg.push("klint".to_owned());
+
         config.override_queries = Some(|_, provider| {
             // Calling `optimized_mir` will steal the result of query `mir_drops_elaborated_and_const_checked`,
             // so hijack `optimized_mir` to run `analysis_mir` first.
