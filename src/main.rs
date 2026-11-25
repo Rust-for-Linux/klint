@@ -49,6 +49,9 @@ extern crate rustc_target;
 extern crate rustc_trait_selection;
 extern crate thiserror;
 
+// Override the C allocator in the same way that the `rustc` binary would do.
+rustc_driver::override_c_allocator_in_binary!();
+
 use rustc_driver::Callbacks;
 use rustc_interface::interface::Config;
 use rustc_middle::ty::TyCtxt;

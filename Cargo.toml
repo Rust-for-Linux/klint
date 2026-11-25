@@ -15,6 +15,10 @@ object = "0.38.0"
 gimli = "0.33"
 iced-x86 = { version = "1.21.0", default-features = false, features = ["std", "decoder", "gas"] }
 
+# rustc_private ships a copy of it, but we cannot use it because the C code it packs contain LLVM
+# bitcode and will fail against GNU toolchain.
+tikv-jemalloc-sys = "0.7.1"
+
 [dev-dependencies]
 compiletest_rs = { version = "0.11", features = [ "tmp" ] }
 
