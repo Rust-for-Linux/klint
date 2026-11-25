@@ -24,7 +24,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "klint-rustdoc"
-path = "src/rustdoc.rs"
+path = "src/rustdoc-wrapper.rs"
 
 [package.metadata.rust-analyzer]
 # This crate uses #![feature(rustc_private)]
