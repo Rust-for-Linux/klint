@@ -12,7 +12,7 @@ use rustc_data_structures::sync::{DynSend, DynSync, Lock, RwLock};
 use rustc_hir::def_id::{CrateNum, LOCAL_CRATE};
 use rustc_middle::ty::TyCtxt;
 use rustc_serialize::{Decodable, Encodable};
-use rustc_session::config::OutputType;
+use rustc_session::output::OutputType;
 use rustc_span::{DUMMY_SP, Span};
 
 use crate::diagnostic::use_stack::UseSite;

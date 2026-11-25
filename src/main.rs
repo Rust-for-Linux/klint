@@ -53,7 +53,8 @@ use rustc_driver::Callbacks;
 use rustc_interface::interface::Config;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::EarlyDiagCtxt;
-use rustc_session::config::{DebugInfo, ErrorOutputType, OutputType};
+use rustc_session::config::DebugInfo;
+use rustc_session::output::{ErrorOutputType, OutputType};
 use std::sync::atomic::Ordering;
 
 use crate::ctxt::AnalysisCtxt;

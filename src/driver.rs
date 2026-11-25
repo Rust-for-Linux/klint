@@ -16,7 +16,8 @@ use rustc_metadata::creader::MetadataLoaderDyn;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::util::Providers;
-use rustc_session::config::{OutputFilenames, OutputType, PrintRequest};
+use rustc_session::config::{OutputFilenames, PrintRequest};
+use rustc_session::output::OutputType;
 use rustc_session::{CodegenBackendInit, EarlyDiagCtxt, EarlySession, IncrCompSession, Session};
 
 pub trait CallbacksExt: Callbacks + Send + 'static {
