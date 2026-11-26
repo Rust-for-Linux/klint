@@ -5,20 +5,22 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use rustc_codegen_ssa::traits::CodegenBackend;
 use rustc_codegen_ssa::{CompiledModules, CrateInfo, TargetConfig};
+use rustc_data_structures::flock::LockedDir;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::sync::{DynSend, DynSync};
-use rustc_data_structures::unord::UnordMap;
+use rustc_data_structures::temp_dir::MaybeTempDir;
 use rustc_driver::{Callbacks, Compilation};
+use rustc_fs_util::TempDirBuilder;
 use rustc_interface::Config;
 use rustc_interface::interface::Compiler;
 use rustc_metadata::EncodedMetadata;
 use rustc_metadata::creader::MetadataLoaderDyn;
-use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
+use rustc_middle::dep_graph::{IncrCompSession, WorkProductMap};
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::util::Providers;
 use rustc_session::config::{OutputFilenames, PrintRequest};
 use rustc_session::output::OutputType;
-use rustc_session::{CodegenBackendInit, EarlyDiagCtxt, EarlySession, IncrCompSession, Session};
+use rustc_session::{CodegenBackendInit, EarlyDiagCtxt, EarlySession, Session};
 
 pub trait CallbacksExt: Callbacks + Send + 'static {
     type ExtCtxt<'tcx>: DynSend + DynSync;
@@ -150,13 +152,58 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
 
         let crate_info = CrateInfo::new(tcx, self.backend.target_cpu(tcx.sess));
 
-        let (cg, work_map) = self.backend.join_codegen(
+        // `tcx.incr_comp_session` only provides a shared reference, while `join_codegen` requires
+        // `&mut IncrCompSession` to record produced work products. Create a temporary session in a
+        // subdirectory of `new_session_directory` and move its outputs over in `join_codegen` where
+        // `&mut IncrCompSession` is available.
+        let mut temp_dir_guard = None;
+        let mut temp_incr_session = tcx.incr_comp_session.map(|incr_comp_session| {
+            let tmp_dir = MaybeTempDir::new(
+                TempDirBuilder::new()
+                    .prefix(".klint-tmp")
+                    .tempdir_in(&*incr_comp_session.new_session_directory)
+                    .unwrap(),
+                false,
+            );
+            let tmp_path = tmp_dir.as_ref().to_path_buf();
+
+            let old_dir = incr_comp_session
+                .old_session_directory
+                .as_ref()
+                .map(|old_dir| {
+                    LockedDir::try_lock(
+                        old_dir.to_path_buf(),
+                        &tmp_path.join(".old.lock"),
+                        true,
+                        false,
+                    )
+                    .unwrap()
+                });
+            let new_dir =
+                LockedDir::try_lock(tmp_path.clone(), &tmp_path.join(".new.lock"), true, true)
+                    .unwrap();
+
+            temp_dir_guard = Some(tmp_dir);
+            IncrCompSession::new(old_dir, new_dir)
+        });
+
+        let cg = self.backend.join_codegen(
             ongoing_codegen,
             tcx.sess,
-            tcx.incr_comp_session,
+            temp_incr_session.as_mut(),
             outputs,
             &crate_info,
         );
+
+        let incr = temp_incr_session.map(|mut session| {
+            let work_products = std::mem::take(&mut session.new_work_products);
+            drop(session);
+            let tmp_dir = temp_dir_guard.take().unwrap();
+            // Clean up the lock files early, so they don't get moved in join_codegen.
+            let _ = std::fs::remove_file(tmp_dir.as_ref().join(".old.lock"));
+            let _ = std::fs::remove_file(tmp_dir.as_ref().join(".new.lock"));
+            (tmp_dir, work_products)
+        });
 
         self.callback.lock().unwrap().after_codegen(cx::<C>(tcx));
 
@@ -167,18 +214,33 @@ impl<C: CallbacksExt> CodegenBackend for BackendWrapper<C> {
         // SAFETY: we just check the (type-erased) type matches.
         drop(unsafe { Box::from_raw(Box::into_raw(cx) as *mut C::ExtCtxt<'tcx>) });
 
-        Box::new((cg, work_map))
+        Box::new((cg, incr))
     }
 
     fn join_codegen(
         &self,
         ongoing_codegen: Box<dyn Any>,
         _sess: &Session,
-        _incr_comp_session: Option<&IncrCompSession>,
+        incr_comp_session: Option<&mut IncrCompSession>,
         _outputs: &OutputFilenames,
         _crate_info: &CrateInfo,
-    ) -> (CompiledModules, UnordMap<WorkProductId, WorkProduct>) {
-        *ongoing_codegen.downcast().unwrap()
+    ) -> CompiledModules {
+        let (cg, incr): (CompiledModules, Option<(MaybeTempDir, WorkProductMap)>) =
+            *ongoing_codegen.downcast().unwrap();
+        if let (Some((tmp_dir, work_products)), Some(incr_comp_session)) = (incr, incr_comp_session)
+        {
+            for entry in std::fs::read_dir(&tmp_dir).unwrap() {
+                let entry = entry.unwrap();
+                let dest = incr_comp_session
+                    .new_session_directory
+                    .join(entry.file_name());
+                std::fs::rename(entry.path(), dest).unwrap();
+            }
+            assert!(incr_comp_session.new_work_products.is_empty());
+            incr_comp_session.new_work_products = work_products;
+            drop(tmp_dir);
+        }
+        cg
     }
 
     fn init(&mut self, sess: &EarlySession) -> CodegenBackendInit {
